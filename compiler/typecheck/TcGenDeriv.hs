@@ -20,7 +20,7 @@ module TcGenDeriv (
 
         canDeriveAnyClass,
         genDerivedBinds,
-        genTypeableTyConRep,
+        -- genTypeableTyConRep,
         FFoldType(..), functorLikeTraverse,
         deepSubtypesContaining, foldDataConArgs,
         mkCoerceClassMethEqn,
@@ -1278,6 +1278,9 @@ gen_Typeable_binds dflags loc tycon
       | wORD_SIZE dflags == 4 = HsWord64Prim "" . fromIntegral
       | otherwise             = HsWordPrim "" . fromIntegral
 
+
+
+{-
 genTypeableTyConRep :: DynFlags -> SrcSpan -> TyCon ->
                                 (LHsBind RdrName, LSig RdrName)
 genTypeableTyConRep dflags loc tycon =
@@ -1312,7 +1315,7 @@ genTypeableTyConRep dflags loc tycon =
     int64
       | wORD_SIZE dflags == 4 = HsWord64Prim "" . fromIntegral
       | otherwise             = HsWordPrim "" . fromIntegral
-
+-}
 
 
 {-
