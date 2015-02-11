@@ -1639,9 +1639,7 @@ matchClassInst _ clas [ ty ] _
     = panicTcS (text "Unexpected evidence for" <+> ppr (className clas)
                      $$ vcat (map (ppr . idType) (classMethods clas)))
 
-
-
-matchClassInst inerts clas [k,t] loc
+matchClassInst _ clas [k,t] loc
   | className clas == typeableClassName = matchTypeableClass clas k t loc
 
 matchClassInst inerts clas tys loc
@@ -1796,8 +1794,8 @@ matchTypeableClass clas k t loc
   | isForAllTy k                               = return NoInstance
   | Just (tc, ks_tys) <- splitTyConApp_maybe t = doTyConApp tc ks_tys
   | Just (f,kt)       <- splitAppTy_maybe t    = doTyApp f kt
-  | Just n            <- isNumLitTy t          = mkEv [] (EvTypeableTyLit t)
-  | Just s            <- isStrLitTy t          = mkEv [] (EvTypeableTyLit t)
+  | Just _            <- isNumLitTy t          = mkEv [] (EvTypeableTyLit t)
+  | Just _            <- isStrLitTy t          = mkEv [] (EvTypeableTyLit t)
   | otherwise                                  = return NoInstance
 
   where
@@ -1831,7 +1829,7 @@ matchTypeableClass clas k t loc
   -- Representation for concrete kinds.  We just use the kind itself,
   -- but first check to make sure that it is "simple" (i.e., made entirely
   -- out of kind constructors).
-  kindRep ki = do (kc,ks) <- splitTyConApp_maybe ki
+  kindRep ki = do (_,ks) <- splitTyConApp_maybe ki
                   mapM_ kindRep ks
                   return ki
 
