@@ -698,25 +698,34 @@ combineTickScopes s1 s2
 
 -- See Note [Switch Table]
 data SwitchTargets =
-    SwitchTargets (Maybe Label) (M.Map Integer Label)
+    SwitchTargets (Maybe (Integer, Integer)) (Maybe Label) (M.Map Integer Label)
     deriving Eq
 
-mkSwitchTargets :: Maybe Label -> M.Map Integer Label -> SwitchTargets
-mkSwitchTargets = SwitchTargets
+-- mkSwitchTargets normalises the map a bit:
+mkSwitchTargets :: Maybe (Integer, Integer) -> Maybe Label -> M.Map Integer Label -> SwitchTargets
+mkSwitchTargets mbrange mbdef ids
+    = SwitchTargets mbrange mbdef $ dropDefault $ restrict ids
+  where
+    -- It drops entries outside the range, if there is a range
+    restrict | Just (lo,hi) <- mbrange = M.filterWithKey (\x _ -> lo <= x && x <= hi)
+             | otherwise               = id
+    -- It entries that equal the default, if there is a default
+    dropDefault | Just l <- mbdef = M.filter (/= l)
+                | otherwise       = id
 
 mapSwitchTargets :: (Label -> Label) -> SwitchTargets -> SwitchTargets
-mapSwitchTargets f (SwitchTargets mbdef branches)
-    = SwitchTargets (fmap f mbdef) (fmap f branches)
+mapSwitchTargets f (SwitchTargets range mbdef branches)
+    = SwitchTargets range (fmap f mbdef) (fmap f branches)
 
 switchTargetsCases :: SwitchTargets -> [(Integer, Label)]
-switchTargetsCases (SwitchTargets _ branches) = M.toList branches
+switchTargetsCases (SwitchTargets _ _ branches) = M.toList branches
 
 switchTargetsDefault :: SwitchTargets -> Maybe Label
-switchTargetsDefault (SwitchTargets mbdef _) = mbdef
+switchTargetsDefault (SwitchTargets _ mbdef _) = mbdef
 
 switchTargetsToTable :: SwitchTargets -> [Maybe Label]
-switchTargetsToTable (SwitchTargets mbdef branches)
-    | min < 0 =   pprPanic "mapSwitchTargets" empty
+switchTargetsToTable (SwitchTargets _ mbdef branches)
+    | min < 0 = pprPanic "mapSwitchTargets" empty
     | otherwise = [ labelFor i | i <- [0..max] ]
   where
     min = fst (M.findMin branches)
@@ -725,20 +734,21 @@ switchTargetsToTable (SwitchTargets mbdef branches)
                                              Nothing -> mbdef
 
 switchTargetsToList :: SwitchTargets -> [Label]
-switchTargetsToList (SwitchTargets mbdef branches) =  maybeToList mbdef ++ M.elems branches
+switchTargetsToList (SwitchTargets _ mbdef branches)
+    = maybeToList mbdef ++ M.elems branches
 
 -- | Groups cases with equal targets, suitable for pretty-printing to a
 -- c-like switch statement with fall-through semantics.
 switchTargetsFallThrough :: SwitchTargets -> ([([Integer], Label)], Maybe Label)
-switchTargetsFallThrough (SwitchTargets mbdef branches) = (groups, mbdef)
+switchTargetsFallThrough (SwitchTargets _ mbdef branches) = (groups, mbdef)
   where
     groups = map (\xs -> (map fst xs, snd (head xs))) $
              groupBy ((==) `on` snd) $
              M.toList branches
 
 eqSwitchTargetWith :: (Label -> Label -> Bool) -> SwitchTargets -> SwitchTargets -> Bool
-eqSwitchTargetWith eq (SwitchTargets mbdef1 ids1) (SwitchTargets mbdef2 ids2) =
-    goMB mbdef1 mbdef2 && goList (M.toList ids1) (M.toList ids2)
+eqSwitchTargetWith eq (SwitchTargets range1 mbdef1 ids1) (SwitchTargets range2 mbdef2 ids2) =
+    range1 == range2 && goMB mbdef1 mbdef2 && goList (M.toList ids1) (M.toList ids2)
   where
     goMB Nothing Nothing = True
     goMB (Just l1) (Just l2) = l1 `eq` l2

@@ -544,15 +544,12 @@ mk_switch tag_expr branches mb_deflt lo_tag hi_tag via_C
         -- either end of the range (see below), so the first
         -- tag of a real branch is real_lo_tag (not lo_tag).
         arms :: M.Map Integer BlockId
-        arms = M.fromList [ (fromIntegral (i - real_lo_tag), l)
-                          | (i,l) <- branches
-                          , real_lo_tag <= i
-                          , i <= real_hi_tag
-                          ]
+        arms = M.fromList [ (fromIntegral i, l) | (i,l) <- branches ]
+       
        dflags <- getDynFlags
        return $ mkSwitch
            (cmmOffset dflags tag_expr (- real_lo_tag))
-           (mkSwitchTargets mb_deflt arms)
+           (mkSwitchTargets (Just (0, fromIntegral (real_hi_tag-real_lo_tag))) mb_deflt arms)
 
   -- if we can knock off a bunch of default cases with one if, then do so
   | Just deflt <- mb_deflt, (lowest_branch - lo_tag) >= n_branches
