@@ -723,13 +723,19 @@ switchTargetsCases (SwitchTargets _ _ branches) = M.toList branches
 switchTargetsDefault :: SwitchTargets -> Maybe Label
 switchTargetsDefault (SwitchTargets _ mbdef _) = mbdef
 
-switchTargetsToTable :: SwitchTargets -> [Maybe Label]
-switchTargetsToTable (SwitchTargets _ mbdef branches)
-    | min < 0 = pprPanic "mapSwitchTargets" empty
-    | otherwise = [ labelFor i | i <- [0..max] ]
+-- switchTargetsToTable creates a dense jump table, usable for code generation.
+-- This is not possible if there is no explicit range, so before code generation
+-- all switch statements need to be transformed to one with an explicit range.
+--
+-- Returns an offset to add to the value; the list is 0-based on the result
+--
+-- TODO: Is the conversion from Integral to Int fishy?
+switchTargetsToTable :: SwitchTargets -> (Int, [Maybe Label])
+switchTargetsToTable (SwitchTargets Nothing _mbdef _branches)
+    = pprPanic "switchTargetsToTable" empty
+switchTargetsToTable (SwitchTargets (Just (lo,hi)) mbdef branches)
+    = (fromIntegral (-lo), [ labelFor i | i <- [lo..hi] ])
   where
-    min = fst (M.findMin branches)
-    max = fst (M.findMax branches)
     labelFor i = case M.lookup i branches of Just l -> Just l
                                              Nothing -> mbdef
 

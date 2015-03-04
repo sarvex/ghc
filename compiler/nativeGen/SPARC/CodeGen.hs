@@ -314,7 +314,7 @@ genSwitch dflags expr targets
         = error "MachCodeGen: sparc genSwitch PIC not finished\n"
 
         | otherwise
-        = do    (e_reg, e_code) <- getSomeReg expr
+        = do    (e_reg, e_code) <- getSomeReg (cmmOffset dflags expr offset)
 
                 base_reg        <- getNewRegNat II32
                 offset_reg      <- getNewRegNat II32
@@ -335,7 +335,7 @@ genSwitch dflags expr targets
                         , LD      II32 (AddrRegReg base_reg offset_reg) dst
                         , JMP_TBL (AddrRegImm dst (ImmInt 0)) ids label
                         , NOP ]
-  where ids = switchTargetsToTable targets
+  where (offset, ids) = switchTargetsToTable targets
 
 generateJumpTableForInstr :: DynFlags -> Instr
                           -> Maybe (NatCmmDecl CmmStatics Instr)

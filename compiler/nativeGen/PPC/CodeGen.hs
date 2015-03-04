@@ -1205,7 +1205,7 @@ genSwitch :: DynFlags -> CmmExpr -> SwitchTargets -> NatM InstrBlock
 genSwitch dflags expr targets
   | gopt Opt_PIC dflags
   = do
-        (reg,e_code) <- getSomeReg expr
+        (reg,e_code) <- getSomeReg (cmmOffset dflags expr offset)
         tmp <- getNewRegNat II32
         lbl <- getNewLabelNat
         dflags <- getDynFlags
@@ -1221,7 +1221,7 @@ genSwitch dflags expr targets
         return code
   | otherwise
   = do
-        (reg,e_code) <- getSomeReg expr
+        (reg,e_code) <- getSomeReg (cmmOffset dflags expr offset)
         tmp <- getNewRegNat II32
         lbl <- getNewLabelNat
         let code = e_code `appOL` toOL [
@@ -1232,7 +1232,7 @@ genSwitch dflags expr targets
                             BCTR ids (Just lbl)
                     ]
         return code
-  where ids = switchTargetsToTable targets
+  where (offset, ids) = switchTargetsToTable targets
 
 generateJumpTableForInstr :: DynFlags -> Instr
                           -> Maybe (NatCmmDecl CmmStatics Instr)

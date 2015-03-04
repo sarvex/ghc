@@ -2589,7 +2589,7 @@ genSwitch :: DynFlags -> CmmExpr -> SwitchTargets -> NatM InstrBlock
 genSwitch dflags expr targets
   | gopt Opt_PIC dflags
   = do
-        (reg,e_code) <- getSomeReg expr
+        (reg,e_code) <- getSomeReg (cmmOffset dflags expr offset)
         lbl <- getNewLabelNat
         dflags <- getDynFlags
         dynRef <- cmmMakeDynamicReference dflags DataReference lbl
@@ -2631,14 +2631,14 @@ genSwitch dflags expr targets
                            ]
   | otherwise
   = do
-        (reg,e_code) <- getSomeReg expr
+        (reg,e_code) <- getSomeReg (cmmOffset dflags expr offset)
         lbl <- getNewLabelNat
         let op = OpAddr (AddrBaseIndex EABaseNone (EAIndex reg (wORD_SIZE dflags)) (ImmCLbl lbl))
             code = e_code `appOL` toOL [
                     JMP_TBL op ids ReadOnlyData lbl
                  ]
         return code
-  where ids = switchTargetsToTable targets
+  where (offset, ids) = switchTargetsToTable targets
 
 generateJumpTableForInstr :: DynFlags -> Instr -> Maybe (NatCmmDecl (Alignment, CmmStatics) Instr)
 generateJumpTableForInstr dflags (JMP_TBL _ ids section lbl)
