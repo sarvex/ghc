@@ -203,12 +203,14 @@ eqLastWith eqBid (CmmCondBranch c1 t1 f1) (CmmCondBranch c2 t2 f2) =
   c1 == c2 && eqBid t1 t2 && eqBid f1 f2
 eqLastWith eqBid (CmmCall t1 c1 g1 a1 r1 u1) (CmmCall t2 c2 g2 a2 r2 u2) =
   t1 == t2 && eqMaybeWith eqBid c1 c2 && a1 == a2 && r1 == r2 && u1 == u2 && g1 == g2
-eqLastWith eqBid (CmmSwitch e1 bs1) (CmmSwitch e2 bs2) =
-  e1 == e2 && eqListWith (eqMaybeWith eqBid) bs1 bs2
+eqLastWith eqBid (CmmSwitch e1 (mbdef1, bs1)) (CmmSwitch e2 (mbdef2, bs2)) =
+  e1 == e2 && eqMaybeWith eqBid mbdef1 mbdef2 && eqMapWith eqBid bs1 bs2
 eqLastWith _ _ _ = False
 
-eqListWith :: (a -> b -> Bool) -> [a] -> [b] -> Bool
-eqListWith eltEq es es' = all (uncurry eltEq) (List.zip es es')
+eqMapWith :: Eq k => (a -> b -> Bool) -> M.Map k a -> M.Map k b -> Bool
+eqMapWith eltEq m1 m2 =
+    all (\((k1,v1), (k2,v2)) -> k1 == k2 && v1 `eltEq` v2) $
+    List.zip (M.toList m1) (M.toList m2)
 
 eqMaybeWith :: (a -> b -> Bool) -> Maybe a -> Maybe b -> Bool
 eqMaybeWith eltEq (Just e) (Just e') = eltEq e e'

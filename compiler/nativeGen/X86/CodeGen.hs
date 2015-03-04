@@ -180,8 +180,8 @@ stmtToInstrs stmt = do
     CmmCondBranch arg true false -> do b1 <- genCondJump true arg
                                        b2 <- genBranch false
                                        return (b1 `appOL` b2)
-    CmmSwitch arg ids     -> do dflags <- getDynFlags
-                                genSwitch dflags arg ids
+    CmmSwitch arg ids -> do dflags <- getDynFlags
+                            genSwitch dflags arg ids
     CmmCall { cml_target = arg
             , cml_args_regs = gregs } -> do
                                 dflags <- getDynFlags
@@ -2584,9 +2584,9 @@ outOfLineCmmOp mop res args
 -- -----------------------------------------------------------------------------
 -- Generating a table-branch
 
-genSwitch :: DynFlags -> CmmExpr -> [Maybe BlockId] -> NatM InstrBlock
+genSwitch :: DynFlags -> CmmExpr -> SwitchTargets -> NatM InstrBlock
 
-genSwitch dflags expr ids
+genSwitch dflags expr targets
   | gopt Opt_PIC dflags
   = do
         (reg,e_code) <- getSomeReg expr
@@ -2638,6 +2638,7 @@ genSwitch dflags expr ids
                     JMP_TBL op ids ReadOnlyData lbl
                  ]
         return code
+  where ids = switchTargetsToTable targets
 
 generateJumpTableForInstr :: DynFlags -> Instr -> Maybe (NatCmmDecl (Alignment, CmmStatics) Instr)
 generateJumpTableForInstr dflags (JMP_TBL _ ids section lbl)

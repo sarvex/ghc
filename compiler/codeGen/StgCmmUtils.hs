@@ -60,7 +60,6 @@ import SMRep
 import Module
 import Literal
 import Digraph
-import ListSetOps
 import Util
 import Unique
 import DynFlags
@@ -68,6 +67,7 @@ import FastString
 import Outputable
 
 import qualified Data.ByteString as BS
+import qualified Data.Map as M
 import Data.Char
 import Data.List
 import Data.Ord
@@ -540,18 +540,17 @@ mk_switch tag_expr [(tag,lbl)] (Just deflt) _ _ _
 mk_switch tag_expr branches mb_deflt lo_tag hi_tag via_C
   | use_switch  -- Use a switch
   = do let
-        find_branch :: ConTagZ -> Maybe BlockId
-        find_branch i = case (assocMaybe branches i) of
-                          Just lbl -> Just lbl
-                          Nothing  -> mb_deflt
-
         -- NB. we have eliminated impossible branches at
         -- either end of the range (see below), so the first
         -- tag of a real branch is real_lo_tag (not lo_tag).
-        arms :: [Maybe BlockId]
-        arms = [ find_branch i | i <- [real_lo_tag..real_hi_tag]]
+        arms :: M.Map Integer BlockId
+        arms = M.fromList [ (fromIntegral (i - real_lo_tag), l)
+                          | (i,l) <- branches
+                          , real_lo_tag <= i
+                          , i <= real_hi_tag
+                          ]
        dflags <- getDynFlags
-       return (mkSwitch (cmmOffset dflags tag_expr (- real_lo_tag)) arms)
+       return (mkSwitch (cmmOffset dflags tag_expr (- real_lo_tag)) (mb_deflt, arms))
 
   -- if we can knock off a bunch of default cases with one if, then do so
   | Just deflt <- mb_deflt, (lowest_branch - lo_tag) >= n_branches

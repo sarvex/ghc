@@ -258,6 +258,7 @@ import Data.Array
 import Data.Char        ( ord )
 import System.Exit
 import Data.Maybe
+import qualified Data.Map as M
 
 #include "HsVersions.h"
 }
@@ -1319,26 +1320,19 @@ doSwitch mb_range scrut arms deflt
 
         -- Compile each case branch
         table_entries <- mapM emitArm arms
+        let table = M.fromList (concat table_entries)
 
-        -- Construct the table
-        let
-            all_entries = concat table_entries
-            ixs = map fst all_entries
-            (min,max) 
-                | Just (l,u) <- mb_range = (l,u)
-                | otherwise              = (minimum ixs, maximum ixs)
+        -- ToDo: What to do with the mb_range?
 
-            entries = elems (accumArray (\_ a -> Just a) dflt_entry (min,max)
-                                all_entries)
         expr <- scrut
         -- ToDo: check for out of range and jump to default if necessary
-        emit (mkSwitch expr entries)
+        emit $ mkSwitch expr (dflt_entry, table)
    where
-        emitArm :: ([Int],Either BlockId (CmmParse ())) -> CmmParse [(Int,BlockId)]
-        emitArm (ints,Left blockid) = return [ (i,blockid) | i <- ints ]
+        emitArm :: ([Int],Either BlockId (CmmParse ())) -> CmmParse [(Integer,BlockId)]
+        emitArm (ints,Left blockid) = return [ (fromIntegral i,blockid) | i <- ints ]
         emitArm (ints,Right code) = do
            blockid <- forkLabelledCode code
-           return [ (i,blockid) | i <- ints ]
+           return [ (fromIntegral i,blockid) | i <- ints ]
 
 forkLabelledCode :: CmmParse () -> CmmParse BlockId
 forkLabelledCode p = do

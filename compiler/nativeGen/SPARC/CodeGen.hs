@@ -150,8 +150,8 @@ stmtToInstrs stmt = do
     CmmCondBranch arg true false -> do b1 <- genCondJump true arg
                                        b2 <- genBranch false
                                        return (b1 `appOL` b2)
-    CmmSwitch   arg ids         -> do dflags <- getDynFlags
-                                      genSwitch dflags arg ids
+    CmmSwitch arg ids   -> do dflags <- getDynFlags
+                              genSwitch dflags arg ids
     CmmCall { cml_target = arg } -> genJump arg
 
     _
@@ -308,8 +308,8 @@ genCondJump bid bool = do
 -- -----------------------------------------------------------------------------
 -- Generating a table-branch
 
-genSwitch :: DynFlags -> CmmExpr -> [Maybe BlockId] -> NatM InstrBlock
-genSwitch dflags expr ids
+genSwitch :: DynFlags -> CmmExpr -> SwitchTargets -> NatM InstrBlock
+genSwitch dflags expr targets
         | gopt Opt_PIC dflags
         = error "MachCodeGen: sparc genSwitch PIC not finished\n"
 
@@ -335,6 +335,7 @@ genSwitch dflags expr ids
                         , LD      II32 (AddrRegReg base_reg offset_reg) dst
                         , JMP_TBL (AddrRegImm dst (ImmInt 0)) ids label
                         , NOP ]
+  where ids = switchTargetsToTable targets
 
 generateJumpTableForInstr :: DynFlags -> Instr
                           -> Maybe (NatCmmDecl CmmStatics Instr)

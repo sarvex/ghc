@@ -19,6 +19,11 @@ module CmmNode (
 
      -- * Tick scopes
      CmmTickScope(..), isTickSubScope, combineTickScopes,
+
+     -- * Switch
+     SwitchTargets,
+     mapSwitchTargets, switchTargetsToTable, switchTargetsFallThrough,
+     switchTargetsToList,
   ) where
 
 import CodeGen.Platform
@@ -33,7 +38,9 @@ import qualified Unique as U
 
 import Compiler.Hoopl
 import Data.Maybe
-import Data.List (tails,sort)
+import Data.List (tails,sort,groupBy)
+import Data.Function (on)
+import qualified Data.Map as M
 import Prelude hiding (succ)
 
 
@@ -89,11 +96,10 @@ data CmmNode e x where
       cml_true, cml_false :: ULabel
   } -> CmmNode O C
 
-  CmmSwitch :: CmmExpr -> [Maybe Label] -> CmmNode O C -- Table branch
-      -- The scrutinee is zero-based;
-      --      zero -> first block
-      --      one  -> second block etc
-      -- Undefined outside range, and when there's a Nothing
+  CmmSwitch
+    :: CmmExpr -- ^ Scrutinee, of some integral type
+    -> SwitchTargets -- ^ Cases. See [Note SwitchTargets]
+    -> CmmNode O C
 
   CmmCall :: {                -- A native call or tail call
       cml_target :: CmmExpr,  -- never a CmmPrim to a CallishMachOp!
@@ -228,7 +234,7 @@ instance NonLocal CmmNode where
 
   successors (CmmBranch l) = [l]
   successors (CmmCondBranch {cml_true=t, cml_false=f}) = [f, t] -- meets layout constraint
-  successors (CmmSwitch _ ls) = catMaybes ls
+  successors (CmmSwitch _ ids) = switchTargetsToList ids
   successors (CmmCall {cml_cont=l}) = maybeToList l
   successors (CmmForeignCall {succ=l}) = [l]
 
@@ -464,7 +470,7 @@ mapExp f   (CmmStore addr e)                     = CmmStore (f addr) (f e)
 mapExp f   (CmmUnsafeForeignCall tgt fs as)      = CmmUnsafeForeignCall (mapForeignTarget f tgt) fs (map f as)
 mapExp _ l@(CmmBranch _)                         = l
 mapExp f   (CmmCondBranch e ti fi)               = CmmCondBranch (f e) ti fi
-mapExp f   (CmmSwitch e tbl)                     = CmmSwitch (f e) tbl
+mapExp f   (CmmSwitch e ids)                     = CmmSwitch (f e) ids
 mapExp f   n@CmmCall {cml_target=tgt}            = n{cml_target = f tgt}
 mapExp f   (CmmForeignCall tgt fs as succ ret_args updfr intrbl) = CmmForeignCall (mapForeignTarget f tgt) fs (map f as) succ ret_args updfr intrbl
 
@@ -494,7 +500,7 @@ mapExpM f (CmmAssign r e)           = CmmAssign r `fmap` f e
 mapExpM f (CmmStore addr e)         = (\[addr', e'] -> CmmStore addr' e') `fmap` mapListM f [addr, e]
 mapExpM _ (CmmBranch _)             = Nothing
 mapExpM f (CmmCondBranch e ti fi)   = (\x -> CmmCondBranch x ti fi) `fmap` f e
-mapExpM f (CmmSwitch e tbl)         = (\x -> CmmSwitch x tbl)       `fmap` f e
+mapExpM f (CmmSwitch e ids)         = (\x -> CmmSwitch x ids) `fmap` f e
 mapExpM f (CmmCall tgt mb_id r o i s) = (\x -> CmmCall x mb_id r o i s) `fmap` f tgt
 mapExpM f (CmmUnsafeForeignCall tgt fs as)
     = case mapForeignTargetM f tgt of
@@ -560,7 +566,7 @@ foldExpDeep f = foldExp (wrapRecExpf f)
 mapSuccessors :: (Label -> Label) -> CmmNode O C -> CmmNode O C
 mapSuccessors f (CmmBranch bid)        = CmmBranch (f bid)
 mapSuccessors f (CmmCondBranch p y n)  = CmmCondBranch p (f y) (f n)
-mapSuccessors f (CmmSwitch e arms)     = CmmSwitch e (map (fmap f) arms)
+mapSuccessors f (CmmSwitch e ids)      = CmmSwitch e (mapSwitchTargets f ids)
 mapSuccessors _ n = n
 
 -- -----------------------------------------------------------------------------
@@ -687,3 +693,53 @@ combineTickScopes s1 s2
   | s1 `isTickSubScope` s2 = s1
   | s2 `isTickSubScope` s1 = s2
   | otherwise              = CombinedScope s1 s2
+
+
+-- See Note [Switch Table]
+type SwitchTargets = (Maybe Label, M.Map Integer Label)
+
+mapSwitchTargets :: (Label -> Label) -> SwitchTargets -> SwitchTargets
+mapSwitchTargets f (mbdef, branches) =  (fmap f mbdef, fmap f branches)
+
+switchTargetsToTable :: SwitchTargets -> [Maybe Label]
+switchTargetsToTable (mbdef, branches)
+    | min < 0 =   pprPanic "mapSwitchTargets" empty
+    | otherwise = [ labelFor i | i <- [0..max] ]
+  where
+    min = fst (M.findMin branches)
+    max = fst (M.findMax branches)
+    labelFor i = case M.lookup i branches of Just l -> Just l
+                                             Nothing -> mbdef
+
+switchTargetsToList :: SwitchTargets -> [Label]
+switchTargetsToList (mbdef, branches) =  maybeToList mbdef ++ M.elems branches
+
+-- | Groups cases with equal targets, suitable for pretty-printing to a
+-- c-like switch statement with fall-through semantics.
+switchTargetsFallThrough :: SwitchTargets -> ([([Integer], Label)], Maybe Label)
+switchTargetsFallThrough (mbdef, branches) = (groups, mbdef)
+  where
+    groups = map (\xs -> (map fst xs, snd (head xs))) $
+             groupBy ((==) `on` snd) $
+             M.toList branches
+
+
+
+
+-- Note [SwitchTargets]:
+-- ~~~~~~~~~~~~~~~~~~~~~
+--
+-- The branches of a switch are stored in a SwitchTargets, which consists of an
+-- (optional) default jump target, and a map from values to jump targets.
+--
+-- If the default jump target is absent, the behaviour of the switch outside the
+-- values of the map is undefined.
+--
+-- We use an Integer for the keys the map so that it can be used in switches on
+-- unsigned as well as signed integers.
+--
+-- The map must not be empty.
+--
+-- Before code generation, the table needs to be brought into a form where all
+-- entries are non-negative, so that it can be compiled into a jump table.
+-- See switchTargetsToTable.

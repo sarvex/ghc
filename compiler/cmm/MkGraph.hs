@@ -223,8 +223,8 @@ mkJumpExtra dflags conv e actuals updfr_off extra_stack =
 mkCbranch       :: CmmExpr -> BlockId -> BlockId -> CmmAGraph
 mkCbranch pred ifso ifnot = mkLast (CmmCondBranch pred ifso ifnot)
 
-mkSwitch        :: CmmExpr -> [Maybe BlockId] -> CmmAGraph
-mkSwitch e tbl   = mkLast $ CmmSwitch e tbl
+mkSwitch        :: CmmExpr -> SwitchTargets -> CmmAGraph
+mkSwitch e ids = mkLast $ CmmSwitch e ids
 
 mkReturn        :: DynFlags -> CmmExpr -> [CmmActual] -> UpdFrameOffset
                 -> CmmAGraph
