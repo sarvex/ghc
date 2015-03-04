@@ -550,7 +550,9 @@ mk_switch tag_expr branches mb_deflt lo_tag hi_tag via_C
                           , i <= real_hi_tag
                           ]
        dflags <- getDynFlags
-       return (mkSwitch (cmmOffset dflags tag_expr (- real_lo_tag)) (mb_deflt, arms))
+       return $ mkSwitch
+           (cmmOffset dflags tag_expr (- real_lo_tag))
+           (mkSwitchTargets mb_deflt arms)
 
   -- if we can knock off a bunch of default cases with one if, then do so
   | Just deflt <- mb_deflt, (lowest_branch - lo_tag) >= n_branches

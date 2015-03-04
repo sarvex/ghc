@@ -22,8 +22,9 @@ module CmmNode (
 
      -- * Switch
      SwitchTargets,
+     mkSwitchTargets, switchTargetsCases, switchTargetsDefault,
      mapSwitchTargets, switchTargetsToTable, switchTargetsFallThrough,
-     switchTargetsToList,
+     switchTargetsToList, eqSwitchTargetWith,
   ) where
 
 import CodeGen.Platform
@@ -696,13 +697,25 @@ combineTickScopes s1 s2
 
 
 -- See Note [Switch Table]
-type SwitchTargets = (Maybe Label, M.Map Integer Label)
+data SwitchTargets =
+    SwitchTargets (Maybe Label) (M.Map Integer Label)
+    deriving Eq
+
+mkSwitchTargets :: Maybe Label -> M.Map Integer Label -> SwitchTargets
+mkSwitchTargets = SwitchTargets
 
 mapSwitchTargets :: (Label -> Label) -> SwitchTargets -> SwitchTargets
-mapSwitchTargets f (mbdef, branches) =  (fmap f mbdef, fmap f branches)
+mapSwitchTargets f (SwitchTargets mbdef branches)
+    = SwitchTargets (fmap f mbdef) (fmap f branches)
+
+switchTargetsCases :: SwitchTargets -> [(Integer, Label)]
+switchTargetsCases (SwitchTargets _ branches) = M.toList branches
+
+switchTargetsDefault :: SwitchTargets -> Maybe Label
+switchTargetsDefault (SwitchTargets mbdef _) = mbdef
 
 switchTargetsToTable :: SwitchTargets -> [Maybe Label]
-switchTargetsToTable (mbdef, branches)
+switchTargetsToTable (SwitchTargets mbdef branches)
     | min < 0 =   pprPanic "mapSwitchTargets" empty
     | otherwise = [ labelFor i | i <- [0..max] ]
   where
@@ -712,19 +725,27 @@ switchTargetsToTable (mbdef, branches)
                                              Nothing -> mbdef
 
 switchTargetsToList :: SwitchTargets -> [Label]
-switchTargetsToList (mbdef, branches) =  maybeToList mbdef ++ M.elems branches
+switchTargetsToList (SwitchTargets mbdef branches) =  maybeToList mbdef ++ M.elems branches
 
 -- | Groups cases with equal targets, suitable for pretty-printing to a
 -- c-like switch statement with fall-through semantics.
 switchTargetsFallThrough :: SwitchTargets -> ([([Integer], Label)], Maybe Label)
-switchTargetsFallThrough (mbdef, branches) = (groups, mbdef)
+switchTargetsFallThrough (SwitchTargets mbdef branches) = (groups, mbdef)
   where
     groups = map (\xs -> (map fst xs, snd (head xs))) $
              groupBy ((==) `on` snd) $
              M.toList branches
 
-
-
+eqSwitchTargetWith :: (Label -> Label -> Bool) -> SwitchTargets -> SwitchTargets -> Bool
+eqSwitchTargetWith eq (SwitchTargets mbdef1 ids1) (SwitchTargets mbdef2 ids2) =
+    goMB mbdef1 mbdef2 && goList (M.toList ids1) (M.toList ids2)
+  where
+    goMB Nothing Nothing = True
+    goMB (Just l1) (Just l2) = l1 `eq` l2
+    goMB _ _ = False
+    goList [] [] = True
+    goList ((i1,l1):ls1) ((i2,l2):ls2) = i1 == i2 && l1 `eq` l2 && goList ls1 ls2
+    goList _ _ = False
 
 -- Note [SwitchTargets]:
 -- ~~~~~~~~~~~~~~~~~~~~~
