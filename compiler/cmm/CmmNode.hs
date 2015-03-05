@@ -22,7 +22,8 @@ module CmmNode (
 
      -- * Switch
      SwitchTargets,
-     mkSwitchTargets, switchTargetsCases, switchTargetsDefault,
+     mkSwitchTargets,
+     switchTargetsCases, switchTargetsDefault, switchTargetsRange,
      mapSwitchTargets, switchTargetsToTable, switchTargetsFallThrough,
      switchTargetsToList, eqSwitchTargetWith,
   ) where
@@ -696,22 +697,34 @@ combineTickScopes s1 s2
   | otherwise              = CombinedScope s1 s2
 
 
--- See Note [Switch Table]
+-- See Note [SwitchTargets]
 data SwitchTargets =
     SwitchTargets (Maybe (Integer, Integer)) (Maybe Label) (M.Map Integer Label)
     deriving Eq
 
 -- mkSwitchTargets normalises the map a bit:
+--  * No entries outside the range
+--  * No entries equal to the default
+--  * No default if there is a range, and all elements have explicit values 
 mkSwitchTargets :: Maybe (Integer, Integer) -> Maybe Label -> M.Map Integer Label -> SwitchTargets
 mkSwitchTargets mbrange mbdef ids
-    = SwitchTargets mbrange mbdef $ dropDefault $ restrict ids
+    = SwitchTargets mbrange mbdef' ids' 
   where
+    ids' = dropDefault $ restrict ids
+    mbdef' | defaultNeeded = mbdef
+           | otherwise     = Nothing
+
     -- It drops entries outside the range, if there is a range
     restrict | Just (lo,hi) <- mbrange = M.filterWithKey (\x _ -> lo <= x && x <= hi)
              | otherwise               = id
-    -- It entries that equal the default, if there is a default
+
+    -- It drops entries that equal the default, if there is a default
     dropDefault | Just l <- mbdef = M.filter (/= l)
                 | otherwise       = id
+
+    defaultNeeded | Just (lo,hi) <- mbrange = fromIntegral (M.size ids') /= hi-lo+1
+                  | otherwise = True
+
 
 mapSwitchTargets :: (Label -> Label) -> SwitchTargets -> SwitchTargets
 mapSwitchTargets f (SwitchTargets range mbdef branches)
@@ -722,6 +735,9 @@ switchTargetsCases (SwitchTargets _ _ branches) = M.toList branches
 
 switchTargetsDefault :: SwitchTargets -> Maybe Label
 switchTargetsDefault (SwitchTargets _ mbdef _) = mbdef
+
+switchTargetsRange :: SwitchTargets -> Maybe (Integer, Integer)
+switchTargetsRange (SwitchTargets mbrange _ _) = mbrange
 
 -- switchTargetsToTable creates a dense jump table, usable for code generation.
 -- This is not possible if there is no explicit range, so before code generation

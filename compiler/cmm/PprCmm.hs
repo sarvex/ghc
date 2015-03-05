@@ -229,11 +229,12 @@ pprNode node = pp_node <+> pp_debug
                ]
 
       CmmSwitch expr ids ->
-          hang (hcat [ ptext (sLit "switch ")
+          hang (hsep [ ptext (sLit "switch")
+                     , range
                      , if isTrivialCmmExpr expr
                        then ppr expr
                        else parens (ppr expr)
-                     , ptext (sLit " {")
+                     , ptext (sLit "{")
                      ])
              4 (vcat (map ppCase cases) $$ def) $$ rbrace
           where
@@ -249,6 +250,11 @@ pprNode node = pp_node <+> pp_debug
                             , ppr l <> semi
                             ]
                 | otherwise = empty
+
+            range | Just (lo,hi) <- switchTargetsRange ids
+                  = brackets $ hsep [integer lo, ptext (sLit ".."), integer hi]
+                  | otherwise
+                  = empty
 
       CmmCall tgt k regs out res updfr_off ->
           hcat [ ptext (sLit "call"), space
