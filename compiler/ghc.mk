@@ -600,6 +600,7 @@ compiler_stage2_dll0_MODULES += \
 	CmmInfo \
 	CmmMachOp \
 	CmmNode \
+	CmmSwitch \
 	CmmUtils \
 	CodeGen.Platform \
 	CodeGen.Platform.ARM \

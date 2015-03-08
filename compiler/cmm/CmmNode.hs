@@ -26,10 +26,14 @@ module CmmNode (
      switchTargetsCases, switchTargetsDefault, switchTargetsRange,
      mapSwitchTargets, switchTargetsToTable, switchTargetsFallThrough,
      switchTargetsToList, eqSwitchTargetWith,
+
+     SwitchPlan(..),
+     createSwitchPlan,
   ) where
 
 import CodeGen.Platform
 import CmmExpr
+import CmmSwitch
 import DynFlags
 import FastString
 import ForeignCall
@@ -40,9 +44,7 @@ import qualified Unique as U
 
 import Compiler.Hoopl
 import Data.Maybe
-import Data.List (tails,sort,groupBy)
-import Data.Function (on)
-import qualified Data.Map as M
+import Data.List (tails,sort)
 import Prelude hiding (succ)
 
 
@@ -695,104 +697,3 @@ combineTickScopes s1 s2
   | s1 `isTickSubScope` s2 = s1
   | s2 `isTickSubScope` s1 = s2
   | otherwise              = CombinedScope s1 s2
-
-
--- See Note [SwitchTargets]
-data SwitchTargets =
-    SwitchTargets (Maybe (Integer, Integer)) (Maybe Label) (M.Map Integer Label)
-    deriving Eq
-
--- mkSwitchTargets normalises the map a bit:
---  * No entries outside the range
---  * No entries equal to the default
---  * No default if there is a range, and all elements have explicit values 
-mkSwitchTargets :: Maybe (Integer, Integer) -> Maybe Label -> M.Map Integer Label -> SwitchTargets
-mkSwitchTargets mbrange mbdef ids
-    = SwitchTargets mbrange mbdef' ids' 
-  where
-    ids' = dropDefault $ restrict ids
-    mbdef' | defaultNeeded = mbdef
-           | otherwise     = Nothing
-
-    -- It drops entries outside the range, if there is a range
-    restrict | Just (lo,hi) <- mbrange = M.filterWithKey (\x _ -> lo <= x && x <= hi)
-             | otherwise               = id
-
-    -- It drops entries that equal the default, if there is a default
-    dropDefault | Just l <- mbdef = M.filter (/= l)
-                | otherwise       = id
-
-    defaultNeeded | Just (lo,hi) <- mbrange = fromIntegral (M.size ids') /= hi-lo+1
-                  | otherwise = True
-
-
-mapSwitchTargets :: (Label -> Label) -> SwitchTargets -> SwitchTargets
-mapSwitchTargets f (SwitchTargets range mbdef branches)
-    = SwitchTargets range (fmap f mbdef) (fmap f branches)
-
-switchTargetsCases :: SwitchTargets -> [(Integer, Label)]
-switchTargetsCases (SwitchTargets _ _ branches) = M.toList branches
-
-switchTargetsDefault :: SwitchTargets -> Maybe Label
-switchTargetsDefault (SwitchTargets _ mbdef _) = mbdef
-
-switchTargetsRange :: SwitchTargets -> Maybe (Integer, Integer)
-switchTargetsRange (SwitchTargets mbrange _ _) = mbrange
-
--- switchTargetsToTable creates a dense jump table, usable for code generation.
--- This is not possible if there is no explicit range, so before code generation
--- all switch statements need to be transformed to one with an explicit range.
---
--- Returns an offset to add to the value; the list is 0-based on the result
---
--- TODO: Is the conversion from Integral to Int fishy?
-switchTargetsToTable :: SwitchTargets -> (Int, [Maybe Label])
-switchTargetsToTable (SwitchTargets Nothing _mbdef _branches)
-    = pprPanic "switchTargetsToTable" empty
-switchTargetsToTable (SwitchTargets (Just (lo,hi)) mbdef branches)
-    = (fromIntegral (-lo), [ labelFor i | i <- [lo..hi] ])
-  where
-    labelFor i = case M.lookup i branches of Just l -> Just l
-                                             Nothing -> mbdef
-
-switchTargetsToList :: SwitchTargets -> [Label]
-switchTargetsToList (SwitchTargets _ mbdef branches)
-    = maybeToList mbdef ++ M.elems branches
-
--- | Groups cases with equal targets, suitable for pretty-printing to a
--- c-like switch statement with fall-through semantics.
-switchTargetsFallThrough :: SwitchTargets -> ([([Integer], Label)], Maybe Label)
-switchTargetsFallThrough (SwitchTargets _ mbdef branches) = (groups, mbdef)
-  where
-    groups = map (\xs -> (map fst xs, snd (head xs))) $
-             groupBy ((==) `on` snd) $
-             M.toList branches
-
-eqSwitchTargetWith :: (Label -> Label -> Bool) -> SwitchTargets -> SwitchTargets -> Bool
-eqSwitchTargetWith eq (SwitchTargets range1 mbdef1 ids1) (SwitchTargets range2 mbdef2 ids2) =
-    range1 == range2 && goMB mbdef1 mbdef2 && goList (M.toList ids1) (M.toList ids2)
-  where
-    goMB Nothing Nothing = True
-    goMB (Just l1) (Just l2) = l1 `eq` l2
-    goMB _ _ = False
-    goList [] [] = True
-    goList ((i1,l1):ls1) ((i2,l2):ls2) = i1 == i2 && l1 `eq` l2 && goList ls1 ls2
-    goList _ _ = False
-
--- Note [SwitchTargets]:
--- ~~~~~~~~~~~~~~~~~~~~~
---
--- The branches of a switch are stored in a SwitchTargets, which consists of an
--- (optional) default jump target, and a map from values to jump targets.
---
--- If the default jump target is absent, the behaviour of the switch outside the
--- values of the map is undefined.
---
--- We use an Integer for the keys the map so that it can be used in switches on
--- unsigned as well as signed integers.
---
--- The map must not be empty.
---
--- Before code generation, the table needs to be brought into a form where all
--- entries are non-negative, so that it can be compiled into a jump table.
--- See switchTargetsToTable.
