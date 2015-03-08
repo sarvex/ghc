@@ -134,8 +134,8 @@ createSwitchPlan ids =
   where
     (range, m, wrap) = addRange ids
     pieces = concatMap breakTooSmall $ splitAtHoles 10 m
-    flatPlan = findSingleValues $ mkFlatSwitchPlan (switchTargetsDefault ids) range pieces
-    plan = buildTree $ wrap flatPlan
+    flatPlan = findSingleValues $ wrap $ mkFlatSwitchPlan (switchTargetsDefault ids) range pieces
+    plan = buildTree $ flatPlan
 
 
 type SeparatedList b a = (a, [(b,a)])
