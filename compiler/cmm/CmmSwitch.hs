@@ -167,7 +167,7 @@ mkFlatSwitchPlan Nothing _ (m:ms)
 mkFlatSwitchPlan (Just l) r ms = let ((_,p1):ps) = go r ms in (p1, ps)
   where
     go (lo,hi) []
-        | lo >= hi = []
+        | lo > hi = []
         | otherwise = [(lo, Unconditionally l)]
     go (lo,hi) (m:ms)
         | lo < min
@@ -223,12 +223,11 @@ addRange (SwitchTargets Nothing Nothing m) = ((lo,hi), m, id)
   where (lo,_) = M.findMin m
         (hi,_) = M.findMax m
 
--- No range, but a default. Make set the range, but also return the necessary
--- branching
+-- No range, but a default. Create a range, but also emit SwitchPlans for outside the range
 addRange (SwitchTargets Nothing (Just l) m)
     = ( (lo,hi)
       , m
-      , \plan -> (Unconditionally l, lo) `consSL` plan `snocSL` (hi, Unconditionally l)
+      , \plan -> (Unconditionally l, lo) `consSL` plan `snocSL` (hi+1, Unconditionally l)
       )
   where (lo,_) = M.findMin m
         (hi,_) = M.findMax m
