@@ -12,6 +12,7 @@ import Hoopl
 import BlockId
 import Cmm
 import CmmUtils
+import CmmSwitch
 import Maybes
 import Panic
 

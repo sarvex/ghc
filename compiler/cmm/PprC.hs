@@ -33,6 +33,7 @@ import Cmm hiding (pprBBlock)
 import PprCmm ()
 import Hoopl
 import CmmUtils
+import CmmSwitch
 
 -- Utils
 import CPrim

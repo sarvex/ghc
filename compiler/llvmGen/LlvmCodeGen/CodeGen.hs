@@ -18,6 +18,7 @@ import Cmm
 import CPrim
 import PprCmm
 import CmmUtils
+import CmmSwitch
 import Hoopl
 
 import DynFlags

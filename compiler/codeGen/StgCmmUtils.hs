@@ -51,6 +51,7 @@ import MkGraph
 import CodeGen.Platform
 import CLabel
 import CmmUtils
+import CmmSwitch
 
 import ForeignCall
 import IdInfo

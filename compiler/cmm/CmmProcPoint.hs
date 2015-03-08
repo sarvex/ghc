@@ -18,6 +18,7 @@ import PprCmm ()
 import CmmUtils
 import CmmInfo
 import CmmLive (cmmGlobalLiveness)
+import CmmSwitch
 import Data.List (sortBy)
 import Maybes
 import Control.Monad

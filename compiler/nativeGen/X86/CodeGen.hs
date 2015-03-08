@@ -45,6 +45,7 @@ import BlockId
 import Module           ( primPackageKey )
 import PprCmm           ()
 import CmmUtils
+import CmmSwitch
 import Cmm
 import Hoopl
 import CLabel

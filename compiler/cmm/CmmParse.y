@@ -226,6 +226,7 @@ import CmmOpt
 import MkGraph
 import Cmm
 import CmmUtils
+import CmmSwitch
 import CmmInfo
 import BlockId
 import CmmLex

@@ -45,6 +45,7 @@ import BlockId
 import PprCmm           ( pprExpr )
 import Cmm
 import CmmUtils
+import CmmSwitch
 import CLabel
 import Hoopl
 

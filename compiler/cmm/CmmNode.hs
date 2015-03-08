@@ -19,16 +19,6 @@ module CmmNode (
 
      -- * Tick scopes
      CmmTickScope(..), isTickSubScope, combineTickScopes,
-
-     -- * Switch
-     SwitchTargets,
-     mkSwitchTargets,
-     switchTargetsCases, switchTargetsDefault, switchTargetsRange,
-     mapSwitchTargets, switchTargetsToTable, switchTargetsFallThrough,
-     switchTargetsToList, eqSwitchTargetWith,
-
-     SwitchPlan(..),
-     createSwitchPlan,
   ) where
 
 import CodeGen.Platform

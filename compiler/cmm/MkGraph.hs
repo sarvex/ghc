@@ -22,6 +22,7 @@ where
 import BlockId
 import Cmm
 import CmmCallConv
+import CmmSwitch
 
 import Compiler.Hoopl hiding (Unique, (<*>), mkFirst, mkMiddle, mkLast, mkLabel, mkBranch, Shape(..))
 import DynFlags

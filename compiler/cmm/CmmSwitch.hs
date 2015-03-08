@@ -129,7 +129,7 @@ data SwitchPlan
 
 createSwitchPlan :: SwitchTargets -> SwitchPlan
 createSwitchPlan ids = 
-    pprTrace "createSwitchPlan" (text (show ids) $$ text (show (range,m)) $$ text (show pieces) $$ text (show flatPlan) $$ text (show plan)) $
+    -- pprTrace "createSwitchPlan" (text (show ids) $$ text (show (range,m)) $$ text (show pieces) $$ text (show flatPlan) $$ text (show plan)) $
     plan 
   where
     (range, m, wrap) = addRange ids

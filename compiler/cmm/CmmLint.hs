@@ -14,6 +14,7 @@ import Hoopl
 import Cmm
 import CmmUtils
 import CmmLive
+import CmmSwitch
 import PprCmm ()
 import BlockId
 import FastString

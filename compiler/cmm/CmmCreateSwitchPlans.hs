@@ -19,6 +19,22 @@ cmmCreateSwitchPlans dflags g = do
     blocks' <- concat <$> mapM (visitSwitches dflags) (toBlockList g)
     return $ ofBlockList (g_entry g) blocks'
 
+visitSwitches :: DynFlags -> CmmBlock -> UniqSM [CmmBlock]
+visitSwitches dflags block
+  | (CmmEntry l s, middle, CmmSwitch expr ids) <- blockSplit block
+  = do
+    let plan = createSwitchPlan ids
+
+    (newTail, newBlocks) <- implementSwitchPlan dflags expr plan
+
+    let block' = CmmEntry l s `blockJoinHead` middle `blockAppend` newTail 
+
+    return $ block' : newBlocks
+
+  | otherwise
+  = return [block]
+
+
 -- Implementing a switch plan (returning a tail block)
 implementSwitchPlan :: DynFlags -> CmmExpr -> SwitchPlan -> UniqSM (Block CmmNode O C, [CmmBlock])
 implementSwitchPlan _ _ (Unconditionally l)
@@ -55,21 +71,5 @@ implementSwitchPlan' dflags expr p
     (last, newBlocks) <- implementSwitchPlan dflags expr p
     let block = CmmEntry bid GlobalScope `blockJoinHead` last
     return (bid, block: newBlocks)
-
-
-visitSwitches :: DynFlags -> CmmBlock -> UniqSM [CmmBlock]
-visitSwitches dflags block
-  | (CmmEntry l s, middle, CmmSwitch expr ids) <- blockSplit block
-  = do
-    let plan = createSwitchPlan ids
-
-    (newTail, newBlocks) <- implementSwitchPlan dflags expr plan
-
-    let block' = CmmEntry l s `blockJoinHead` middle `blockAppend` newTail 
-
-    return $ block' : newBlocks
-
-  | otherwise
-  = return [block]
 
 

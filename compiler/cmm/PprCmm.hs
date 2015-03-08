@@ -43,6 +43,7 @@ import BlockId ()
 import CLabel
 import Cmm
 import CmmUtils
+import CmmSwitch
 import DynFlags
 import FastString
 import Outputable

@@ -43,6 +43,7 @@ import NCGMonad
 import BlockId
 import Cmm
 import CmmUtils
+import CmmSwitch
 import Hoopl
 import PIC
 import Reg
