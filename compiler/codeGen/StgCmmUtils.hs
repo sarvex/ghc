@@ -506,6 +506,12 @@ mk_switch tag_expr [(tag,lbl)] (Just deflt) _ _
             -- so there must be a default
        return (mkCbranch cond deflt lbl)
 
+-- TWO BRANCHES, NO DEFAULT: simply do it here
+mk_switch tag_expr [(tag1,lbl1), (_tag2,lbl2)] Nothing _ _
+  = do dflags <- getDynFlags
+       let cond =  cmmNeWord dflags tag_expr (mkIntExpr dflags tag1)
+       return (mkCbranch cond lbl2 lbl1)
+
 -- SOMETHING MORE COMPLICATED: defer to CmmCreateSwitchPlans
 mk_switch tag_expr branches mb_deflt lo_tag hi_tag
   = do let
