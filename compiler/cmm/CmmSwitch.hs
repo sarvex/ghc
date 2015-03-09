@@ -18,6 +18,54 @@ import Data.List (groupBy)
 import Data.Function (on)
 import qualified Data.Map as M
 
+-- Note [Cmm Switches, the general plan]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Compiling a high-level switch statement, as it comes out of a STG case
+-- expression, for example, allows for a surprising amount of design decisions.
+-- Therefore, we cleanly separated this from the Stg → Cmm transformation, as
+-- well as from the actual code generation.
+--
+-- The overall plan is:
+--  * The Stg → Cmm transformation creates a single `SwitchTargets` in
+--    emitSwitch and emitCmmLitSwitch in StgCmmUtils.hs.
+--    At this stage, they are unsuitable for code generation.
+--  * A dedicated Cmm transformation (CmmCreateSwitchPlans) replaces these
+--    switch statements with code that is suitable for code generation, i.e.
+--    a nice balanced tree of decisions with dense jump tables in the leafs.
+--    The actual planning of this tree is performed in pure code in createSwitchPlan
+--    in this module. See Note [createSwitchPlan].
+--  * The actual code generation will not do any further processing and
+--    implement each CmmSwitch with a jump tables.
+--
+-- When compiling to LLVM or C, CmmCreateSwitchPlans leaves the switch
+-- statements alone, as we can turn a SwitchTargets value into a nice
+-- switch-statement in LLVM resp. C, and leave the rest to the compiler.
+
+
+
+-----------------------------------------------------------------------------
+-- Switch Targets
+
+-- Note [SwitchTargets]:
+-- ~~~~~~~~~~~~~~~~~~~~~
+--
+-- The branches of a switch are stored in a SwitchTargets, which consists of an
+-- (optional) default jump target, and a map from values to jump targets.
+--
+-- If the default jump target is absent, the behaviour of the switch outside the
+-- values of the map is undefined.
+--
+-- We use an Integer for the keys the map so that it can be used in switches on
+-- unsigned as well as signed integers.
+--
+-- The map must not be empty.
+--
+-- Before code generation, the table needs to be brought into a form where all
+-- entries are non-negative, so that it can be compiled into a jump table.
+-- See switchTargetsToTable.
+
+
 -- See Note [SwitchTargets]
 data SwitchTargets =
     SwitchTargets (Maybe (Integer, Integer)) (Maybe Label) (M.Map Integer Label)
@@ -101,24 +149,29 @@ eqSwitchTargetWith eq (SwitchTargets range1 mbdef1 ids1) (SwitchTargets range2 m
     goList ((i1,l1):ls1) ((i2,l2):ls2) = i1 == i2 && l1 `eq` l2 && goList ls1 ls2
     goList _ _ = False
 
--- Note [SwitchTargets]:
--- ~~~~~~~~~~~~~~~~~~~~~
---
--- The branches of a switch are stored in a SwitchTargets, which consists of an
--- (optional) default jump target, and a map from values to jump targets.
---
--- If the default jump target is absent, the behaviour of the switch outside the
--- values of the map is undefined.
---
--- We use an Integer for the keys the map so that it can be used in switches on
--- unsigned as well as signed integers.
---
--- The map must not be empty.
---
--- Before code generation, the table needs to be brought into a form where all
--- entries are non-negative, so that it can be compiled into a jump table.
--- See switchTargetsToTable.
+-----------------------------------------------------------------------------
+-- Code generation for Switches
 
+
+-- Note [createSwitchPlan]
+-- ~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- A SwitchPlan describes how a Switch statement is to be broken down into
+-- smaller pieces suitable for code generation.
+--
+-- createSwitchPlan creates such a switch plan, in these steps:
+--  1. it checks if the switch is unbounded, and takes care of the default
+--     segments outside the range of the actual branches (addRange)
+--  2. it splits the switch statement at segments of non-default values that
+--     are too large. See splitAtHoles and Note [When to split SwitchTargets]
+--  3. Too small jump tables should be avoided, so we break up smaller pieces
+--     in breakTooSmall.
+--  4. We will in the segments between those pieces with a jump to the default
+--     label (if there is one), returning a SeparatedList in mkFlatSwitchPlan
+--  5. The segments outside the range from step 1 are added now.
+--  6. We find replace two less-than branches by a single equal-to-test in
+--     findSingleValues
+--  7. The thus collected pieces are assembled to a balanced binary tree.
 
 data SwitchPlan
     = Unconditionally Label 
@@ -126,6 +179,8 @@ data SwitchPlan
     | IfLT Integer SwitchPlan SwitchPlan
     | JumpTable SwitchTargets
   deriving Show
+
+type FlatSwitchPlan = SeparatedList Integer SwitchPlan
 
 createSwitchPlan :: SwitchTargets -> SwitchPlan
 createSwitchPlan ids = 
@@ -138,21 +193,70 @@ createSwitchPlan ids =
     plan = buildTree $ flatPlan
 
 
-type SeparatedList b a = (a, [(b,a)])
+---
+--- Step 1: Adding a range
+---
 
-consSL :: (a, b) -> SeparatedList b a -> SeparatedList b a
-consSL (a, b) (a', xs) = (a, (b,a'):xs)
+-- All switch targets surviving this stage needs a range. This adds the range,
+-- together with the neccessary branching.
+addRange :: SwitchTargets ->
+    ((Integer, Integer), M.Map Integer Label, FlatSwitchPlan -> FlatSwitchPlan)
 
-snocSL :: SeparatedList b a -> (b, a) -> SeparatedList b a
-snocSL (a', xs) (b, a) = (a', xs ++ [(b,a)])
+-- There is a range, nothing to do
+addRange (SwitchTargets (Just r) _ m) = (r, m, id)
 
-divideSL :: SeparatedList b a -> (SeparatedList b a, b, SeparatedList b a)
-divideSL (_,[]) = error "divideSL: Singleton SeparatedList"
-divideSL (p,xs) = ((p, xs1), m, (p', xs2))
-  where 
-    (xs1, (m,p'):xs2) = splitAt (length xs `div` 2) xs
+-- There is no range, but also no default. We can set the range
+-- to whatever is found in the map
+addRange (SwitchTargets Nothing Nothing m) = ((lo,hi), m, id)
+  where (lo,_) = M.findMin m
+        (hi,_) = M.findMax m
 
-type FlatSwitchPlan = SeparatedList Integer SwitchPlan 
+-- No range, but a default. Create a range, but also emit SwitchPlans for outside the range
+addRange (SwitchTargets Nothing (Just l) m)
+    = ( (lo,hi)
+      , m
+      , \plan -> (Unconditionally l, lo) `consSL` plan `snocSL` (hi+1, Unconditionally l)
+      )
+  where (lo,_) = M.findMin m
+        (hi,_) = M.findMax m
+
+
+---
+--- Step 2: Splitting at large holes
+---
+splitAtHoles :: Integer -> M.Map Integer a -> [M.Map Integer a]
+splitAtHoles holeSize m = map (\range -> restrictMap range m) nonHoles
+  where
+    holes = filter (\(l,h) -> h - l > holeSize) $ zip (M.keys m) (tail (M.keys m))
+    nonHoles = reassocTuples lo holes hi
+
+    (lo,_) = M.findMin m
+    (hi,_) = M.findMax m
+
+-- Note [When to split SwitchTargets]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- TODO: What is a sensible number here? Probably at least the size of the code
+-- for a comparision + a conditional jump + an addition + a relative jump
+-- For now we use 10.
+
+---
+--- Step 3: Avoid small jump tables
+---
+-- We do not want jump tables below a certain size. This breaks them up
+-- (into singleton maps, for now)
+breakTooSmall :: M.Map Integer a -> [M.Map Integer a]
+breakTooSmall m
+  | M.size m > 4 = [m]
+  | otherwise    = [M.singleton k v | (k,v) <- M.toList m]
+
+---
+---  Step 4: Fill in the blanks
+---
+
+-- A FlatSwitchPlan is a list of SwitchPlans, seperated by a integer dividing the range.
+-- So if we have  [plan1] n [plan2], then we use plan1 if the expression is <
+-- n, and plan2 otherwise.
 
 mkFlatSwitchPlan :: Maybe Label -> (Integer, Integer) -> [M.Map Integer Label] -> FlatSwitchPlan
 
@@ -191,6 +295,10 @@ mkLeafPlan mbdef m
     min = fst (M.findMin m)
     max = fst (M.findMax m)
 
+---
+---  Step 5: Reduce the number of branches using ==
+---
+
 -- A seqence of three unconditional jumps, with the outer two pointing to the
 -- same value and the bounds off by exactly one can be improved 
 findSingleValues :: FlatSwitchPlan -> FlatSwitchPlan
@@ -202,6 +310,10 @@ findSingleValues (p, (i,p'):xs)
 findSingleValues (p, [])
   = (p, [])
 
+---
+---  Step 6: Actually build the tree
+---
+
 -- Build a balanced tree from a separated list
 buildTree :: FlatSwitchPlan -> SwitchPlan
 buildTree (p,[]) = p
@@ -209,58 +321,40 @@ buildTree sl = IfLT m (buildTree sl1) (buildTree sl2)
   where 
     (sl1, m, sl2) = divideSL sl
 
--- All switch targets surviving this stage needs a range. This adds the range,
--- together with the neccessary branching.
-addRange :: SwitchTargets ->
-    ((Integer, Integer), M.Map Integer Label, FlatSwitchPlan -> FlatSwitchPlan)
-
--- There is a range, nothing to do
-addRange (SwitchTargets (Just r) _ m) = (r, m, id)
-
--- There is no range, but also no default. We can set the range
--- to whatever is found in the map
-addRange (SwitchTargets Nothing Nothing m) = ((lo,hi), m, id)
-  where (lo,_) = M.findMin m
-        (hi,_) = M.findMax m
-
--- No range, but a default. Create a range, but also emit SwitchPlans for outside the range
-addRange (SwitchTargets Nothing (Just l) m)
-    = ( (lo,hi)
-      , m
-      , \plan -> (Unconditionally l, lo) `consSL` plan `snocSL` (hi+1, Unconditionally l)
-      )
-  where (lo,_) = M.findMin m
-        (hi,_) = M.findMax m
 
 
--- We do not want jump tables below a certain size. This breaks them up
--- (into singleton maps, for now)
-breakTooSmall :: M.Map Integer a -> [M.Map Integer a]
-breakTooSmall m
-  | M.size m > 4 = [m]
-  | otherwise    = [M.singleton k v | (k,v) <- M.toList m]
+--
+-- Utility data type: Non-empty lists with extra markers in between each
+-- element:
+--
 
+type SeparatedList b a = (a, [(b,a)])
 
-splitAtHoles :: Integer -> M.Map Integer a -> [M.Map Integer a]
-splitAtHoles holeSize m = map (\range -> restrictMap range m) nonHoles
+consSL :: (a, b) -> SeparatedList b a -> SeparatedList b a
+consSL (a, b) (a', xs) = (a, (b,a'):xs)
+
+snocSL :: SeparatedList b a -> (b, a) -> SeparatedList b a
+snocSL (a', xs) (b, a) = (a', xs ++ [(b,a)])
+
+divideSL :: SeparatedList b a -> (SeparatedList b a, b, SeparatedList b a)
+divideSL (_,[]) = error "divideSL: Singleton SeparatedList"
+divideSL (p,xs) = ((p, xs1), m, (p', xs2))
   where
-    holes = filter (\(l,h) -> h - l > holeSize) $ zip (M.keys m) (tail (M.keys m))
-    nonHoles = reassocTuples lo holes hi 
+    (xs1, (m,p'):xs2) = splitAt (length xs `div` 2) xs
 
-    (lo,_) = M.findMin m
-    (hi,_) = M.findMax m
+--
+-- Other Utilities
+--
 
+restrictMap :: Integral a => (a,a) -> M.Map a b -> M.Map a b
+restrictMap (lo,hi) m = mid
+  where (_,   mid_hi) = M.split (lo-1) m
+        (mid, _) =      M.split (hi+1) mid_hi
 
+-- for example: reassocTuples a [(b,c),(d,e)] f == [(a,b),(c,d),(e,f)]
 reassocTuples :: a -> [(a,a)] -> a -> [(a,a)]
 reassocTuples initial [] last
     = [(initial,last)]
 reassocTuples initial ((a,b):tuples) last
     = (initial,a) : reassocTuples b tuples last
   
--- One would like to have this in Data.Map
-restrictMap :: Integral a => (a,a) -> M.Map a b -> M.Map a b
-restrictMap (lo,hi) m = mid 
-  where (_,   mid_hi) = M.split (lo-1) m
-        (mid, _) =      M.split (hi+1) mid_hi
-
-

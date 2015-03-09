@@ -514,6 +514,7 @@ mk_switch tag_expr [(tag1,lbl1), (_tag2,lbl2)] Nothing _ _
        return (mkCbranch cond lbl2 lbl1)
 
 -- SOMETHING MORE COMPLICATED: defer to CmmCreateSwitchPlans
+-- See Note [Cmm Switches, the general plan] in CmmSwitch
 mk_switch tag_expr branches mb_deflt lo_tag hi_tag
   = do let
         -- NB. we have eliminated impossible branches at
