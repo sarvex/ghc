@@ -226,7 +226,7 @@ import CmmOpt
 import MkGraph
 import Cmm
 import CmmUtils
-import CmmSwitch
+import CmmSwitch        ( mkSwitchTargets )
 import CmmInfo
 import BlockId
 import CmmLex

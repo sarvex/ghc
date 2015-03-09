@@ -494,7 +494,7 @@ mapExpM f (CmmAssign r e)           = CmmAssign r `fmap` f e
 mapExpM f (CmmStore addr e)         = (\[addr', e'] -> CmmStore addr' e') `fmap` mapListM f [addr, e]
 mapExpM _ (CmmBranch _)             = Nothing
 mapExpM f (CmmCondBranch e ti fi)   = (\x -> CmmCondBranch x ti fi) `fmap` f e
-mapExpM f (CmmSwitch e ids)         = (\x -> CmmSwitch x ids) `fmap` f e
+mapExpM f (CmmSwitch e tbl)         = (\x -> CmmSwitch x tbl)       `fmap` f e
 mapExpM f (CmmCall tgt mb_id r o i s) = (\x -> CmmCall x mb_id r o i s) `fmap` f tgt
 mapExpM f (CmmUnsafeForeignCall tgt fs as)
     = case mapForeignTargetM f tgt of

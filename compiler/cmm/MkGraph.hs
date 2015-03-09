@@ -22,7 +22,7 @@ where
 import BlockId
 import Cmm
 import CmmCallConv
-import CmmSwitch
+import CmmSwitch (SwitchTargets)
 
 import Compiler.Hoopl hiding (Unique, (<*>), mkFirst, mkMiddle, mkLast, mkLabel, mkBranch, Shape(..))
 import DynFlags
@@ -225,7 +225,7 @@ mkCbranch       :: CmmExpr -> BlockId -> BlockId -> CmmAGraph
 mkCbranch pred ifso ifnot = mkLast (CmmCondBranch pred ifso ifnot)
 
 mkSwitch        :: CmmExpr -> SwitchTargets -> CmmAGraph
-mkSwitch e ids = mkLast $ CmmSwitch e ids
+mkSwitch e tbl   = mkLast $ CmmSwitch e tbl
 
 mkReturn        :: DynFlags -> CmmExpr -> [CmmActual] -> UpdFrameOffset
                 -> CmmAGraph

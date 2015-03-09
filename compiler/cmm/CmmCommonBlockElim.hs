@@ -8,7 +8,7 @@ where
 import BlockId
 import Cmm
 import CmmUtils
-import CmmSwitch
+import CmmSwitch (eqSwitchTargetWith)
 import CmmContFlowOpt
 import Prelude hiding (iterate, succ, unzip, zip)
 

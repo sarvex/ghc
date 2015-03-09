@@ -12,7 +12,7 @@ import Hoopl
 import BlockId
 import Cmm
 import CmmUtils
-import CmmSwitch
+import CmmSwitch (mapSwitchTargets)
 import Maybes
 import Panic
 
