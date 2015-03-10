@@ -1329,7 +1329,7 @@ doSwitch mb_range scrut arms deflt
 
         expr <- scrut
         -- ToDo: check for out of range and jump to default if necessary
-        emit $ mkSwitch expr (mkSwitchTargets mb_range dflt_entry table)
+        emit $ mkSwitch expr False (mkSwitchTargets mb_range dflt_entry table)
    where
         emitArm :: ([Integer],Either BlockId (CmmParse ())) -> CmmParse [(Integer,BlockId)]
         emitArm (ints,Left blockid) = return [ (i,blockid) | i <- ints ]
