@@ -13,6 +13,7 @@ import CmmUtils
 import CmmSwitch
 import UniqSupply
 import DynFlags
+import Prelude
 
 
 --
