@@ -37,7 +37,7 @@ cmmCreateSwitchPlans dflags g = do
 
 visitSwitches :: DynFlags -> CmmBlock -> UniqSM [CmmBlock]
 visitSwitches dflags block
-  | (entry@(CmmEntry l scope), middle, CmmSwitch expr ids) <- blockSplit block
+  | (entry@(CmmEntry _ scope), middle, CmmSwitch expr ids) <- blockSplit block
   = do
     let plan = createSwitchPlan ids
 
