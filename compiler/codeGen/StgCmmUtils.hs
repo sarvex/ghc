@@ -87,14 +87,6 @@ cgLit (MachStr s) = newByteStringCLit (BS.unpack s)
 cgLit other_lit   = do dflags <- getDynFlags
                        return (mkSimpleLit dflags other_lit)
 
-mkLtOp :: DynFlags -> Literal -> MachOp
--- On signed literals we must do a signed comparison
-mkLtOp dflags (MachInt _)    = MO_S_Lt (wordWidth dflags)
-mkLtOp _      (MachFloat _)  = MO_F_Lt W32
-mkLtOp _      (MachDouble _) = MO_F_Lt W64
-mkLtOp dflags lit            = MO_U_Lt (typeWidth (cmmLitType dflags (mkSimpleLit dflags lit)))
-                                -- ToDo: seems terribly indirect!
-
 mkSimpleLit :: DynFlags -> Literal -> CmmLit
 mkSimpleLit dflags (MachChar   c)    = CmmInt (fromIntegral (ord c)) (wordWidth dflags)
 mkSimpleLit dflags MachNullAddr      = zeroCLit dflags
@@ -472,27 +464,27 @@ emitSwitch tag_expr branches mb_deflt lo_tag hi_tag = do
     branches_lbls <- label_branches join_lbl branches
     tag_expr'     <- assignTemp' tag_expr
 
-    -- Sort the branches before calling mk_switch
+    -- Sort the branches before calling mk_discrete_switch
     let branches_lbls' = [ (fromIntegral i, l) | (i,l) <- sortBy (comparing fst) branches_lbls ]
 
-    emit $ mk_switch tag_expr' branches_lbls'
-                       mb_deflt_lbl (fromIntegral lo_tag) (fromIntegral hi_tag)
+    emit $ mk_discrete_switch tag_expr' branches_lbls'
+                       mb_deflt_lbl (Just (fromIntegral lo_tag, fromIntegral hi_tag))
 
     emitLabel join_lbl
 
-mk_switch :: CmmExpr -> [(Integer, BlockId)]
+mk_discrete_switch :: CmmExpr -> [(Integer, BlockId)]
           -> Maybe BlockId
-          -> Integer -> Integer
+          -> Maybe (Integer, Integer)
           -> CmmAGraph
 
 -- SINGLETON TAG RANGE: no case analysis to do
-mk_switch _tag_expr [(tag, lbl)] _ lo_tag hi_tag
+mk_discrete_switch _tag_expr [(tag, lbl)] _ (Just (lo_tag, hi_tag))
   | lo_tag == hi_tag
   = ASSERT( tag == lo_tag )
     mkBranch lbl
 
 -- SINGLETON BRANCH, NO DEFAULT: no case analysis to do
-mk_switch _tag_expr [(_tag,lbl)] Nothing _ _
+mk_discrete_switch _tag_expr [(_tag,lbl)] Nothing _
   = mkBranch lbl
         -- The simplifier might have eliminated a case
         --       so we may have e.g. case xs of
@@ -502,8 +494,8 @@ mk_switch _tag_expr [(_tag,lbl)] Nothing _ _
 
 -- SOMETHING MORE COMPLICATED: defer to CmmCreateSwitchPlans
 -- See Note [Cmm Switches, the general plan] in CmmSwitch
-mk_switch tag_expr branches mb_deflt lo_tag hi_tag
-  = mkSwitch tag_expr $ mkSwitchTargets (Just (lo_tag, hi_tag)) mb_deflt (M.fromList branches)
+mk_discrete_switch tag_expr branches mb_deflt range
+  = mkSwitch tag_expr $ mkSwitchTargets range mb_deflt (M.fromList branches)
 
 divideBranches :: Ord a => [(a,b)] -> ([(a,b)], a, [(a,b)])
 divideBranches branches = (lo_branches, mid, hi_branches)
@@ -520,20 +512,23 @@ emitCmmLitSwitch :: CmmExpr                    -- Tag to switch on
                -> [(Literal, CmmAGraphScoped)] -- Tagged branches
                -> CmmAGraphScoped              -- Default branch (always)
                -> FCode ()                     -- Emit the code
--- Used for general literals, whose size might not be a word,
--- where there is always a default case, and where we don't know
--- the range of values for certain.  For simplicity we always generate a tree.
---
--- ToDo: for integers we could do better here, perhaps by generalising
--- mk_switch and using that.  --SDM 15/09/2004
 emitCmmLitSwitch _scrut []       deflt = emit $ fst deflt
 emitCmmLitSwitch scrut  branches deflt = do
     scrut' <- assignTemp' scrut
     join_lbl <- newLabelC
     deflt_lbl <- label_code join_lbl deflt
     branches_lbls <- label_branches join_lbl branches
-    emit =<< mk_lit_switch scrut' deflt_lbl noBound
-               (sortBy (comparing fst) branches_lbls)
+
+    dflags <- getDynFlags
+    let cmm_ty = cmmExprType dflags scrut
+
+    if isFloatType cmm_ty
+    then emit =<< mk_float_switch scrut' deflt_lbl noBound branches_lbls
+    else emit $ mk_discrete_switch -- TODO Remember signedness
+        scrut'
+        [(litValue lit,l) | (lit,l) <- branches_lbls]
+        (Just deflt_lbl)
+        Nothing
     emitLabel join_lbl
 
 -- | lower bound (inclusive), upper bound (exclusive)
@@ -542,31 +537,25 @@ type LitBound = (Maybe Literal, Maybe Literal)
 noBound :: LitBound
 noBound = (Nothing, Nothing)
 
-mk_lit_switch :: CmmExpr -> BlockId
+mk_float_switch :: CmmExpr -> BlockId
               -> LitBound
               -> [(Literal,BlockId)]
               -> FCode CmmAGraph
-mk_lit_switch scrut deflt bounds [(lit,blk)]
-  = do
-  dflags <- getDynFlags
-  let
-    cmm_lit = mkSimpleLit dflags lit
-    cmm_ty  = cmmLitType dflags cmm_lit
-    rep     = typeWidth cmm_ty
-    ne      = if isFloatType cmm_ty then MO_F_Ne rep else MO_Ne rep
-
-  return $ if lit `onlyWithinBounds'` bounds
-           then mkBranch blk
-           else mkCbranch (CmmMachOp ne [scrut, CmmLit cmm_lit]) deflt blk
-  where
-    -- If the bounds already imply scrut == lit, then we can skip the final check (#10129)
-    l `onlyWithinBounds'` (Just lo, Just hi) = l `onlyWithinBounds` (lo, hi)
-    _ `onlyWithinBounds'` _ = False
-
-mk_lit_switch scrut deflt_blk_id (lo_bound, hi_bound) branches
+mk_float_switch scrut deflt _bounds [(lit,blk)]
   = do dflags <- getDynFlags
-       lo_blk <- mk_lit_switch scrut deflt_blk_id bounds_lo lo_branches
-       hi_blk <- mk_lit_switch scrut deflt_blk_id bounds_hi hi_branches
+       return $ mkCbranch (cond dflags) deflt blk
+  where
+    cond dflags = CmmMachOp ne [scrut, CmmLit cmm_lit]
+      where
+        cmm_lit = mkSimpleLit dflags lit
+        cmm_ty  = cmmLitType dflags cmm_lit
+        rep     = typeWidth cmm_ty
+        ne      = MO_F_Ne rep
+
+mk_float_switch scrut deflt_blk_id (lo_bound, hi_bound) branches
+  = do dflags <- getDynFlags
+       lo_blk <- mk_float_switch scrut deflt_blk_id bounds_lo lo_branches
+       hi_blk <- mk_float_switch scrut deflt_blk_id bounds_hi hi_branches
        mkCmmIfThenElse (cond dflags) lo_blk hi_blk
   where
     (lo_branches, mid_lit, hi_branches) = divideBranches branches
@@ -574,8 +563,12 @@ mk_lit_switch scrut deflt_blk_id (lo_bound, hi_bound) branches
     bounds_lo = (lo_bound, Just mid_lit)
     bounds_hi = (Just mid_lit, hi_bound)
 
-    cond dflags = CmmMachOp (mkLtOp dflags mid_lit)
-                            [scrut, CmmLit (mkSimpleLit dflags mid_lit)]
+    cond dflags = CmmMachOp lt [scrut, CmmLit cmm_lit]
+      where
+        cmm_lit = mkSimpleLit dflags mid_lit
+        cmm_ty  = cmmLitType dflags cmm_lit
+        rep     = typeWidth cmm_ty
+        lt      = MO_F_Lt rep
 
 
 --------------

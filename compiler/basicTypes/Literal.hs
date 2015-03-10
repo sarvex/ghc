@@ -31,6 +31,7 @@ module Literal
         , isZeroLit
         , litFitsInChar
         , onlyWithinBounds
+        , litValue
 
         -- ** Coercions
         , word2IntLit, int2WordLit
@@ -270,6 +271,15 @@ isZeroLit (MachWord64 0) = True
 isZeroLit (MachFloat  0) = True
 isZeroLit (MachDouble 0) = True
 isZeroLit _              = False
+
+litValue  :: Literal -> Integer
+litValue (MachChar   c) = toInteger $ ord c
+litValue (MachInt    i) = i
+litValue (MachInt64  i) = i
+litValue (MachWord   i) = i
+litValue (MachWord64 i) = i
+litValue (LitInteger i _) = i
+litValue l = pprPanic "litValue" (ppr l)
 
 {-
         Coercions
