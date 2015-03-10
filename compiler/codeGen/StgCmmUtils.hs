@@ -524,10 +524,16 @@ emitCmmLitSwitch scrut  branches deflt = do
     dflags <- getDynFlags
     let cmm_ty = cmmExprType dflags scrut
 
+    -- We find the necessary type information in the literals in the branches
+    let signed = case head branches of
+                    (MachInt _, _) ->   True
+                    (MachInt64 _, _) -> True
+                    _ -> False
+
     if isFloatType cmm_ty
     then emit =<< mk_float_switch scrut' deflt_lbl noBound branches_lbls
     else emit $ mk_discrete_switch
-        False -- TODO Remember signedness
+        signed
         scrut'
         [(litValue lit,l) | (lit,l) <- branches_lbls]
         (Just deflt_lbl)

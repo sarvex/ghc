@@ -64,7 +64,9 @@ implementSwitchPlan dflags signed expr = go
         (bid2, newBlocks2) <- go' ids2
 
         -- TODO: Is this cast safe?
-        let scrut = cmmULtWord dflags expr (mkIntExpr dflags (fromIntegral i))
+        let lt | signed    = cmmSLtWord
+               | otherwise = cmmULtWord
+            scrut = lt dflags expr $ CmmLit $ mkWordCLit dflags i
             lastNode = CmmCondBranch scrut bid1 bid2
             lastBlock = emptyBlock `blockJoinTail` lastNode
         return (lastBlock, newBlocks1++newBlocks2)
