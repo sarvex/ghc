@@ -2,7 +2,7 @@
 module CmmSwitch (
      SwitchTargets,
      mkSwitchTargets,
-     switchTargetsCases, switchTargetsDefault, switchTargetsRange,
+     switchTargetsCases, switchTargetsDefault, switchTargetsRange, switchTargetsSigned,
      mapSwitchTargets, switchTargetsToTable, switchTargetsFallThrough,
      switchTargetsToList, eqSwitchTargetWith,
 
@@ -68,16 +68,20 @@ import qualified Data.Map as M
 
 -- See Note [SwitchTargets]
 data SwitchTargets =
-    SwitchTargets (Maybe (Integer, Integer)) (Maybe Label) (M.Map Integer Label)
+    SwitchTargets
+        Bool                       -- ^ Signed values
+        (Maybe (Integer, Integer)) -- ^ Range
+        (Maybe Label)              -- ^ Default value
+        (M.Map Integer Label)      -- ^ The branches
     deriving (Show, Eq)
 
 -- mkSwitchTargets normalises the map a bit:
 --  * No entries outside the range
 --  * No entries equal to the default
 --  * No default if there is a range, and all elements have explicit values 
-mkSwitchTargets :: Maybe (Integer, Integer) -> Maybe Label -> M.Map Integer Label -> SwitchTargets
-mkSwitchTargets mbrange mbdef ids
-    = SwitchTargets mbrange mbdef' ids' 
+mkSwitchTargets :: Bool -> Maybe (Integer, Integer) -> Maybe Label -> M.Map Integer Label -> SwitchTargets
+mkSwitchTargets signed mbrange mbdef ids
+    = SwitchTargets signed mbrange mbdef' ids' 
   where
     ids' = dropDefault $ restrict ids
     mbdef' | defaultNeeded = mbdef
@@ -97,17 +101,20 @@ mkSwitchTargets mbrange mbdef ids
 
 
 mapSwitchTargets :: (Label -> Label) -> SwitchTargets -> SwitchTargets
-mapSwitchTargets f (SwitchTargets range mbdef branches)
-    = SwitchTargets range (fmap f mbdef) (fmap f branches)
+mapSwitchTargets f (SwitchTargets signed range mbdef branches)
+    = SwitchTargets signed range (fmap f mbdef) (fmap f branches)
 
 switchTargetsCases :: SwitchTargets -> [(Integer, Label)]
-switchTargetsCases (SwitchTargets _ _ branches) = M.toList branches
+switchTargetsCases (SwitchTargets _ _ _ branches) = M.toList branches
 
 switchTargetsDefault :: SwitchTargets -> Maybe Label
-switchTargetsDefault (SwitchTargets _ mbdef _) = mbdef
+switchTargetsDefault (SwitchTargets _ _ mbdef _) = mbdef
 
 switchTargetsRange :: SwitchTargets -> Maybe (Integer, Integer)
-switchTargetsRange (SwitchTargets mbrange _ _) = mbrange
+switchTargetsRange (SwitchTargets _ mbrange _ _) = mbrange
+
+switchTargetsSigned :: SwitchTargets -> Bool
+switchTargetsSigned (SwitchTargets signed _ _ _) = signed
 
 -- switchTargetsToTable creates a dense jump table, usable for code generation.
 -- This is not possible if there is no explicit range, so before code generation
@@ -117,30 +124,30 @@ switchTargetsRange (SwitchTargets mbrange _ _) = mbrange
 --
 -- TODO: Is the conversion from Integral to Int fishy?
 switchTargetsToTable :: SwitchTargets -> (Int, [Maybe Label])
-switchTargetsToTable (SwitchTargets Nothing _mbdef _branches)
+switchTargetsToTable (SwitchTargets _ Nothing _mbdef _branches)
     = pprPanic "switchTargetsToTable" empty
-switchTargetsToTable (SwitchTargets (Just (lo,hi)) mbdef branches)
+switchTargetsToTable (SwitchTargets _ (Just (lo,hi)) mbdef branches)
     = (fromIntegral (-lo), [ labelFor i | i <- [lo..hi] ])
   where
     labelFor i = case M.lookup i branches of Just l -> Just l
                                              Nothing -> mbdef
 
 switchTargetsToList :: SwitchTargets -> [Label]
-switchTargetsToList (SwitchTargets _ mbdef branches)
+switchTargetsToList (SwitchTargets _ _ mbdef branches)
     = maybeToList mbdef ++ M.elems branches
 
 -- | Groups cases with equal targets, suitable for pretty-printing to a
 -- c-like switch statement with fall-through semantics.
 switchTargetsFallThrough :: SwitchTargets -> ([([Integer], Label)], Maybe Label)
-switchTargetsFallThrough (SwitchTargets _ mbdef branches) = (groups, mbdef)
+switchTargetsFallThrough (SwitchTargets _ _ mbdef branches) = (groups, mbdef)
   where
     groups = map (\xs -> (map fst xs, snd (head xs))) $
              groupBy ((==) `on` snd) $
              M.toList branches
 
 eqSwitchTargetWith :: (Label -> Label -> Bool) -> SwitchTargets -> SwitchTargets -> Bool
-eqSwitchTargetWith eq (SwitchTargets range1 mbdef1 ids1) (SwitchTargets range2 mbdef2 ids2) =
-    range1 == range2 && goMB mbdef1 mbdef2 && goList (M.toList ids1) (M.toList ids2)
+eqSwitchTargetWith eq (SwitchTargets signed1 range1 mbdef1 ids1) (SwitchTargets signed2 range2 mbdef2 ids2) =
+    signed1 == signed2 && range1 == range2 && goMB mbdef1 mbdef2 && goList (M.toList ids1) (M.toList ids2)
   where
     goMB Nothing Nothing = True
     goMB (Just l1) (Just l2) = l1 `eq` l2
@@ -176,7 +183,7 @@ eqSwitchTargetWith eq (SwitchTargets range1 mbdef1 ids1) (SwitchTargets range2 m
 data SwitchPlan
     = Unconditionally Label 
     | IfEqual Integer Label SwitchPlan
-    | IfLT Integer SwitchPlan SwitchPlan
+    | IfLT Bool Integer SwitchPlan SwitchPlan
     | JumpTable SwitchTargets
   deriving Show
 
@@ -187,10 +194,11 @@ createSwitchPlan ids =
     -- pprTrace "createSwitchPlan" (text (show ids) $$ text (show (range,m)) $$ text (show pieces) $$ text (show flatPlan) $$ text (show plan)) $
     plan 
   where
+    signed = switchTargetsSigned ids
     (range, m, wrap) = addRange ids
     pieces = concatMap breakTooSmall $ splitAtHoles 10 m
-    flatPlan = findSingleValues $ wrap $ mkFlatSwitchPlan (switchTargetsDefault ids) range pieces
-    plan = buildTree $ flatPlan
+    flatPlan = findSingleValues $ wrap $ mkFlatSwitchPlan signed (switchTargetsDefault ids) range pieces
+    plan = buildTree signed $ flatPlan
 
 
 ---
@@ -203,16 +211,16 @@ addRange :: SwitchTargets ->
     ((Integer, Integer), M.Map Integer Label, FlatSwitchPlan -> FlatSwitchPlan)
 
 -- There is a range, nothing to do
-addRange (SwitchTargets (Just r) _ m) = (r, m, id)
+addRange (SwitchTargets _ (Just r) _ m) = (r, m, id)
 
 -- There is no range, but also no default. We can set the range
 -- to whatever is found in the map
-addRange (SwitchTargets Nothing Nothing m) = ((lo,hi), m, id)
+addRange (SwitchTargets _ Nothing Nothing m) = ((lo,hi), m, id)
   where (lo,_) = M.findMin m
         (hi,_) = M.findMax m
 
 -- No range, but a default. Create a range, but also emit SwitchPlans for outside the range
-addRange (SwitchTargets Nothing (Just l) m)
+addRange (SwitchTargets _ Nothing (Just l) m)
     = ( (lo,hi)
       , m
       , \plan -> (Unconditionally l, lo) `consSL` plan `snocSL` (hi+1, Unconditionally l)
@@ -258,17 +266,17 @@ breakTooSmall m
 -- So if we have  [plan1] n [plan2], then we use plan1 if the expression is <
 -- n, and plan2 otherwise.
 
-mkFlatSwitchPlan :: Maybe Label -> (Integer, Integer) -> [M.Map Integer Label] -> FlatSwitchPlan
+mkFlatSwitchPlan :: Bool -> Maybe Label -> (Integer, Integer) -> [M.Map Integer Label] -> FlatSwitchPlan
 
 -- If we have no default (i.e. undefined where there is no entry), we can
 -- branch at the minimum of each map
-mkFlatSwitchPlan Nothing _ [] = pprPanic "mkFlatSwitchPlan with nothing left to do" empty
-mkFlatSwitchPlan Nothing _ (m:ms)
-  = (mkLeafPlan Nothing m , [ (fst (M.findMin m'), mkLeafPlan Nothing m') | m' <- ms ])
+mkFlatSwitchPlan _ Nothing _ [] = pprPanic "mkFlatSwitchPlan with nothing left to do" empty
+mkFlatSwitchPlan signed  Nothing _ (m:ms)
+  = (mkLeafPlan signed Nothing m , [ (fst (M.findMin m'), mkLeafPlan signed Nothing m') | m' <- ms ])
 
 -- If we have a default, we have to interleave segments that jump 
 -- to the default between the maps
-mkFlatSwitchPlan (Just l) r ms = let ((_,p1):ps) = go r ms in (p1, ps)
+mkFlatSwitchPlan signed (Just l) r ms = let ((_,p1):ps) = go r ms in (p1, ps)
   where
     go (lo,hi) []
         | lo > hi = []
@@ -277,7 +285,7 @@ mkFlatSwitchPlan (Just l) r ms = let ((_,p1):ps) = go r ms in (p1, ps)
         | lo < min
         = (lo, Unconditionally l) : go (min,hi) (m:ms)
         | lo == min
-        = (lo, mkLeafPlan (Just l) m) : go (max+1,hi) ms
+        = (lo, mkLeafPlan signed (Just l) m) : go (max+1,hi) ms
         | otherwise
         = pprPanic "mkFlatSwitchPlan" (integer lo <+> integer min)
       where
@@ -285,12 +293,12 @@ mkFlatSwitchPlan (Just l) r ms = let ((_,p1):ps) = go r ms in (p1, ps)
         max = fst (M.findMax m)
     
 
-mkLeafPlan :: Maybe Label -> M.Map Integer Label -> SwitchPlan
-mkLeafPlan mbdef m
+mkLeafPlan :: Bool -> Maybe Label -> M.Map Integer Label -> SwitchPlan
+mkLeafPlan signed mbdef m
     | [(_,l)] <- M.toList m -- singleton map
     = Unconditionally l 
     | otherwise
-    = JumpTable $ mkSwitchTargets (Just (min,max)) mbdef m
+    = JumpTable $ mkSwitchTargets signed (Just (min,max)) mbdef m
   where
     min = fst (M.findMin m)
     max = fst (M.findMax m)
@@ -315,9 +323,9 @@ findSingleValues (p, [])
 ---
 
 -- Build a balanced tree from a separated list
-buildTree :: FlatSwitchPlan -> SwitchPlan
-buildTree (p,[]) = p
-buildTree sl = IfLT m (buildTree sl1) (buildTree sl2)
+buildTree :: Bool -> FlatSwitchPlan -> SwitchPlan
+buildTree _ (p,[]) = p
+buildTree signed sl = IfLT signed m (buildTree signed sl1) (buildTree signed sl2)
   where 
     (sl1, m, sl2) = divideSL sl
 

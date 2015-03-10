@@ -472,7 +472,7 @@ emitSwitch tag_expr branches mb_deflt lo_tag hi_tag = do
 
     emitLabel join_lbl
 
-mk_discrete_switch :: Bool -- ^ value is signed
+mk_discrete_switch :: Bool -- ^ Use signed comparisons
           -> CmmExpr
           -> [(Integer, BlockId)]
           -> Maybe BlockId
@@ -497,7 +497,7 @@ mk_discrete_switch _ _tag_expr [(_tag,lbl)] Nothing _
 -- SOMETHING MORE COMPLICATED: defer to CmmCreateSwitchPlans
 -- See Note [Cmm Switches, the general plan] in CmmSwitch
 mk_discrete_switch signed tag_expr branches mb_deflt range
-  = mkSwitch tag_expr signed $ mkSwitchTargets range mb_deflt (M.fromList branches)
+  = mkSwitch tag_expr $ mkSwitchTargets signed range mb_deflt (M.fromList branches)
 
 divideBranches :: Ord a => [(a,b)] -> ([(a,b)], a, [(a,b)])
 divideBranches branches = (lo_branches, mid, hi_branches)

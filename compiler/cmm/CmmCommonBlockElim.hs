@@ -101,7 +101,7 @@ hash_block block =
         hash_node (CmmCondBranch p _ _) = hash_e p
         hash_node (CmmCall e _ _ _ _ _) = hash_e e
         hash_node (CmmForeignCall t _ _ _ _ _ _) = hash_tgt t
-        hash_node (CmmSwitch e _ _) = hash_e e
+        hash_node (CmmSwitch e _) = hash_e e
         hash_node _ = error "hash_node: unknown Cmm node!"
 
         hash_reg :: CmmReg -> Word32
@@ -204,8 +204,8 @@ eqLastWith eqBid (CmmCondBranch c1 t1 f1) (CmmCondBranch c2 t2 f2) =
   c1 == c2 && eqBid t1 t2 && eqBid f1 f2
 eqLastWith eqBid (CmmCall t1 c1 g1 a1 r1 u1) (CmmCall t2 c2 g2 a2 r2 u2) =
   t1 == t2 && eqMaybeWith eqBid c1 c2 && a1 == a2 && r1 == r2 && u1 == u2 && g1 == g2
-eqLastWith eqBid (CmmSwitch e1 signed1 ids1) (CmmSwitch e2 signed2 ids2) =
-  e1 == e2 && signed1 == signed2 && eqSwitchTargetWith eqBid ids1 ids2
+eqLastWith eqBid (CmmSwitch e1 ids1) (CmmSwitch e2 ids2) =
+  e1 == e2 && eqSwitchTargetWith eqBid ids1 ids2
 eqLastWith _ _ _ = False
 
 eqMaybeWith :: (a -> b -> Bool) -> Maybe a -> Maybe b -> Bool

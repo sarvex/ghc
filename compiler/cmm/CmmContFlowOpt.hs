@@ -356,7 +356,7 @@ replaceLabels env g
      txnode :: CmmNode e x -> CmmNode e x
      txnode (CmmBranch bid)         = CmmBranch (lookup bid)
      txnode (CmmCondBranch p t f)   = mkCmmCondBranch (exp p) (lookup t) (lookup f)
-     txnode (CmmSwitch e signed ids) = CmmSwitch (exp e) signed (mapSwitchTargets lookup ids)
+     txnode (CmmSwitch e ids)       = CmmSwitch (exp e) (mapSwitchTargets lookup ids)
      txnode (CmmCall t k rg a res r) = CmmCall (exp t) (liftM lookup k) rg a res r
      txnode fc@CmmForeignCall{}     = fc{ args = map exp (args fc)
                                         , succ = lookup (succ fc) }

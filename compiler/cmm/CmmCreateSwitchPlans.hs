@@ -37,11 +37,11 @@ cmmCreateSwitchPlans dflags g = do
 
 visitSwitches :: DynFlags -> CmmBlock -> UniqSM [CmmBlock]
 visitSwitches dflags block
-  | (entry@(CmmEntry l scope), middle, CmmSwitch expr signed ids) <- blockSplit block
+  | (entry@(CmmEntry l scope), middle, CmmSwitch expr ids) <- blockSplit block
   = do
     let plan = createSwitchPlan ids
 
-    (newTail, newBlocks) <- implementSwitchPlan dflags signed scope expr plan
+    (newTail, newBlocks) <- implementSwitchPlan dflags scope expr plan
 
     let block' = entry `blockJoinHead` middle `blockAppend` newTail
 
@@ -52,14 +52,14 @@ visitSwitches dflags block
 
 
 -- Implementing a switch plan (returning a tail block)
-implementSwitchPlan :: DynFlags -> Bool -> CmmTickScope -> CmmExpr -> SwitchPlan -> UniqSM (Block CmmNode O C, [CmmBlock])
-implementSwitchPlan dflags signed scope expr = go
+implementSwitchPlan :: DynFlags -> CmmTickScope -> CmmExpr -> SwitchPlan -> UniqSM (Block CmmNode O C, [CmmBlock])
+implementSwitchPlan dflags scope expr = go
   where
     go (Unconditionally l)
       = return (emptyBlock `blockJoinTail` CmmBranch l, [])
     go (JumpTable ids)
-      = return (emptyBlock `blockJoinTail` CmmSwitch expr signed ids, [])
-    go (IfLT i ids1 ids2)
+      = return (emptyBlock `blockJoinTail` CmmSwitch expr ids, [])
+    go (IfLT signed i ids1 ids2)
       = do
         (bid1, newBlocks1) <- go' ids1
         (bid2, newBlocks2) <- go' ids2
@@ -88,5 +88,3 @@ implementSwitchPlan dflags signed scope expr = go
         (last, newBlocks) <- go p
         let block = CmmEntry bid scope `blockJoinHead` last
         return (bid, block: newBlocks)
-
-

@@ -229,7 +229,7 @@ pprNode node = pp_node <+> pp_debug
                , ppr f <> semi
                ]
 
-      CmmSwitch expr _ ids ->
+      CmmSwitch expr ids ->
           hang (hsep [ ptext (sLit "switch")
                      , range
                      , if isTrivialCmmExpr expr
