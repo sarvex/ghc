@@ -151,8 +151,8 @@ stmtToInstrs stmt = do
     CmmCondBranch arg true false -> do b1 <- genCondJump true arg
                                        b2 <- genBranch false
                                        return (b1 `appOL` b2)
-    CmmSwitch arg ids   -> do dflags <- getDynFlags
-                              genSwitch dflags arg ids
+    CmmSwitch arg _ ids   -> do dflags <- getDynFlags
+                                genSwitch dflags arg ids
     CmmCall { cml_target = arg } -> genJump arg
 
     _

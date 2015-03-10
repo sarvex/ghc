@@ -92,6 +92,7 @@ data CmmNode e x where
 
   CmmSwitch
     :: CmmExpr -- ^ Scrutinee, of some integral type
+    -> Bool -- ^ Whether to use signed comparisons
     -> SwitchTargets -- ^ Cases. See [Note SwitchTargets]
     -> CmmNode O C
 
@@ -228,7 +229,7 @@ instance NonLocal CmmNode where
 
   successors (CmmBranch l) = [l]
   successors (CmmCondBranch {cml_true=t, cml_false=f}) = [f, t] -- meets layout constraint
-  successors (CmmSwitch _ ids) = switchTargetsToList ids
+  successors (CmmSwitch _ _ ids) = switchTargetsToList ids
   successors (CmmCall {cml_cont=l}) = maybeToList l
   successors (CmmForeignCall {succ=l}) = [l]
 
@@ -309,7 +310,7 @@ instance UserOfRegs LocalReg (CmmNode e x) where
     CmmStore addr rval -> fold f (fold f z addr) rval
     CmmUnsafeForeignCall t _ args -> fold f (fold f z t) args
     CmmCondBranch expr _ _ -> fold f z expr
-    CmmSwitch expr _ -> fold f z expr
+    CmmSwitch expr _ _ -> fold f z expr
     CmmCall {cml_target=tgt} -> fold f z tgt
     CmmForeignCall {tgt=tgt, args=args} -> fold f (fold f z tgt) args
     _ -> z
@@ -324,7 +325,7 @@ instance UserOfRegs GlobalReg (CmmNode e x) where
     CmmStore addr rval -> fold f (fold f z addr) rval
     CmmUnsafeForeignCall t _ args -> fold f (fold f z t) args
     CmmCondBranch expr _ _ -> fold f z expr
-    CmmSwitch expr _ -> fold f z expr
+    CmmSwitch expr _ _ -> fold f z expr
     CmmCall {cml_target=tgt, cml_args_regs=args} -> fold f (fold f z args) tgt
     CmmForeignCall {tgt=tgt, args=args} -> fold f (fold f z tgt) args
     _ -> z
@@ -464,7 +465,7 @@ mapExp f   (CmmStore addr e)                     = CmmStore (f addr) (f e)
 mapExp f   (CmmUnsafeForeignCall tgt fs as)      = CmmUnsafeForeignCall (mapForeignTarget f tgt) fs (map f as)
 mapExp _ l@(CmmBranch _)                         = l
 mapExp f   (CmmCondBranch e ti fi)               = CmmCondBranch (f e) ti fi
-mapExp f   (CmmSwitch e ids)                     = CmmSwitch (f e) ids
+mapExp f   (CmmSwitch e signed ids)              = CmmSwitch (f e) signed ids
 mapExp f   n@CmmCall {cml_target=tgt}            = n{cml_target = f tgt}
 mapExp f   (CmmForeignCall tgt fs as succ ret_args updfr intrbl) = CmmForeignCall (mapForeignTarget f tgt) fs (map f as) succ ret_args updfr intrbl
 
@@ -494,7 +495,7 @@ mapExpM f (CmmAssign r e)           = CmmAssign r `fmap` f e
 mapExpM f (CmmStore addr e)         = (\[addr', e'] -> CmmStore addr' e') `fmap` mapListM f [addr, e]
 mapExpM _ (CmmBranch _)             = Nothing
 mapExpM f (CmmCondBranch e ti fi)   = (\x -> CmmCondBranch x ti fi) `fmap` f e
-mapExpM f (CmmSwitch e tbl)         = (\x -> CmmSwitch x tbl)       `fmap` f e
+mapExpM f (CmmSwitch e signed tbl)  = (\x -> CmmSwitch x signed tbl) `fmap` f e
 mapExpM f (CmmCall tgt mb_id r o i s) = (\x -> CmmCall x mb_id r o i s) `fmap` f tgt
 mapExpM f (CmmUnsafeForeignCall tgt fs as)
     = case mapForeignTargetM f tgt of
@@ -548,7 +549,7 @@ foldExp f (CmmStore addr e) z                     = f addr $ f e z
 foldExp f (CmmUnsafeForeignCall t _ as) z         = foldr f (foldExpForeignTarget f t z) as
 foldExp _ (CmmBranch _) z                         = z
 foldExp f (CmmCondBranch e _ _) z                 = f e z
-foldExp f (CmmSwitch e _) z                       = f e z
+foldExp f (CmmSwitch e _ _) z                     = f e z
 foldExp f (CmmCall {cml_target=tgt}) z            = f tgt z
 foldExp f (CmmForeignCall {tgt=tgt, args=args}) z = foldr f (foldExpForeignTarget f tgt z) args
 
@@ -560,7 +561,7 @@ foldExpDeep f = foldExp (wrapRecExpf f)
 mapSuccessors :: (Label -> Label) -> CmmNode O C -> CmmNode O C
 mapSuccessors f (CmmBranch bid)        = CmmBranch (f bid)
 mapSuccessors f (CmmCondBranch p y n)  = CmmCondBranch p (f y) (f n)
-mapSuccessors f (CmmSwitch e ids)      = CmmSwitch e (mapSwitchTargets f ids)
+mapSuccessors f (CmmSwitch e signed ids) = CmmSwitch e signed (mapSwitchTargets f ids)
 mapSuccessors _ n = n
 
 -- -----------------------------------------------------------------------------

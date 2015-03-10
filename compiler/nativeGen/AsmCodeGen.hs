@@ -1036,9 +1036,9 @@ cmmStmtConFold stmt
                    CmmLit (CmmInt _ _) -> CmmBranch true
                    _other -> CmmCondBranch test' true false
 
-        CmmSwitch expr ids
+        CmmSwitch expr signed ids
            -> do expr' <- cmmExprConFold DataReference expr
-                 return $ CmmSwitch expr' ids
+                 return $ CmmSwitch expr' signed ids
 
         other
            -> return other

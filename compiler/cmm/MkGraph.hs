@@ -35,7 +35,7 @@ import OrdList
 import Control.Monad
 import Data.List
 import Data.Maybe
-import Prelude (($),Int,Eq(..)) -- avoid importing (<*>)
+import Prelude (($),Int,Eq(..),Bool) -- avoid importing (<*>)
 
 #include "HsVersions.h"
 
@@ -224,8 +224,8 @@ mkJumpExtra dflags conv e actuals updfr_off extra_stack =
 mkCbranch       :: CmmExpr -> BlockId -> BlockId -> CmmAGraph
 mkCbranch pred ifso ifnot = mkLast (CmmCondBranch pred ifso ifnot)
 
-mkSwitch        :: CmmExpr -> SwitchTargets -> CmmAGraph
-mkSwitch e tbl   = mkLast $ CmmSwitch e tbl
+mkSwitch        :: CmmExpr -> Bool -> SwitchTargets -> CmmAGraph
+mkSwitch e signed tbl = mkLast $ CmmSwitch e signed tbl
 
 mkReturn        :: DynFlags -> CmmExpr -> [CmmActual] -> UpdFrameOffset
                 -> CmmAGraph

@@ -113,7 +113,7 @@ stmtToInstrs stmt = case stmt of
     CmmBranch id         -> genBranch id
     CmmCondBranch arg true false
                          -> genCondBranch arg true false
-    CmmSwitch arg ids    -> genSwitch arg ids
+    CmmSwitch arg _ ids  -> genSwitch arg ids
 
     -- Foreign Call
     CmmUnsafeForeignCall target res args

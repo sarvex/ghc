@@ -251,7 +251,7 @@ pprStmt stmt =
     CmmBranch ident          -> pprBranch ident
     CmmCondBranch expr yes no -> pprCondBranch expr yes no
     CmmCall { cml_target = expr } -> mkJMP_ (pprExpr expr) <> semi
-    CmmSwitch arg ids        -> sdocWithDynFlags $ \dflags ->
+    CmmSwitch arg _ ids      -> sdocWithDynFlags $ \dflags ->
                                 pprSwitch dflags arg ids
 
     _other -> pprPanic "PprC.pprStmt" (ppr stmt)
@@ -1043,7 +1043,7 @@ te_Stmt (CmmUnsafeForeignCall target rs es)
         mapM_ te_temp rs
         mapM_ te_Expr es
 te_Stmt (CmmCondBranch e _ _)   = te_Expr e
-te_Stmt (CmmSwitch e _)         = te_Expr e
+te_Stmt (CmmSwitch e _ _)       = te_Expr e
 te_Stmt (CmmCall { cml_target = e }) = te_Expr e
 te_Stmt _                       = return ()
 

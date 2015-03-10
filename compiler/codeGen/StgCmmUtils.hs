@@ -467,24 +467,26 @@ emitSwitch tag_expr branches mb_deflt lo_tag hi_tag = do
     -- Sort the branches before calling mk_discrete_switch
     let branches_lbls' = [ (fromIntegral i, l) | (i,l) <- sortBy (comparing fst) branches_lbls ]
 
-    emit $ mk_discrete_switch tag_expr' branches_lbls'
+    emit $ mk_discrete_switch False tag_expr' branches_lbls'
                        mb_deflt_lbl (Just (fromIntegral lo_tag, fromIntegral hi_tag))
 
     emitLabel join_lbl
 
-mk_discrete_switch :: CmmExpr -> [(Integer, BlockId)]
+mk_discrete_switch :: Bool -- ^ value is signed
+          -> CmmExpr
+          -> [(Integer, BlockId)]
           -> Maybe BlockId
           -> Maybe (Integer, Integer)
           -> CmmAGraph
 
 -- SINGLETON TAG RANGE: no case analysis to do
-mk_discrete_switch _tag_expr [(tag, lbl)] _ (Just (lo_tag, hi_tag))
+mk_discrete_switch _ _tag_expr [(tag, lbl)] _ (Just (lo_tag, hi_tag))
   | lo_tag == hi_tag
   = ASSERT( tag == lo_tag )
     mkBranch lbl
 
 -- SINGLETON BRANCH, NO DEFAULT: no case analysis to do
-mk_discrete_switch _tag_expr [(_tag,lbl)] Nothing _
+mk_discrete_switch _ _tag_expr [(_tag,lbl)] Nothing _
   = mkBranch lbl
         -- The simplifier might have eliminated a case
         --       so we may have e.g. case xs of
@@ -494,8 +496,8 @@ mk_discrete_switch _tag_expr [(_tag,lbl)] Nothing _
 
 -- SOMETHING MORE COMPLICATED: defer to CmmCreateSwitchPlans
 -- See Note [Cmm Switches, the general plan] in CmmSwitch
-mk_discrete_switch tag_expr branches mb_deflt range
-  = mkSwitch tag_expr $ mkSwitchTargets range mb_deflt (M.fromList branches)
+mk_discrete_switch signed tag_expr branches mb_deflt range
+  = mkSwitch tag_expr signed $ mkSwitchTargets range mb_deflt (M.fromList branches)
 
 divideBranches :: Ord a => [(a,b)] -> ([(a,b)], a, [(a,b)])
 divideBranches branches = (lo_branches, mid, hi_branches)
@@ -524,7 +526,8 @@ emitCmmLitSwitch scrut  branches deflt = do
 
     if isFloatType cmm_ty
     then emit =<< mk_float_switch scrut' deflt_lbl noBound branches_lbls
-    else emit $ mk_discrete_switch -- TODO Remember signedness
+    else emit $ mk_discrete_switch
+        False -- TODO Remember signedness
         scrut'
         [(litValue lit,l) | (lit,l) <- branches_lbls]
         (Just deflt_lbl)

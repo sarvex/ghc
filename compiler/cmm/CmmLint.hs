@@ -171,7 +171,7 @@ lintCmmLast labels node = case node of
             _ <- lintCmmExpr e
             checkCond dflags e
 
-  CmmSwitch e ids -> do
+  CmmSwitch e _ ids -> do
             dflags <- getDynFlags
             mapM_ checkTarget $ switchTargetsToList ids
             erep <- lintCmmExpr e
