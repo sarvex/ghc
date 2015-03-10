@@ -472,61 +472,38 @@ emitSwitch tag_expr branches mb_deflt lo_tag hi_tag = do
     branches_lbls <- label_branches join_lbl branches
     tag_expr'     <- assignTemp' tag_expr
 
-    emit =<< mk_switch tag_expr' (sortBy (comparing fst) branches_lbls)
-                mb_deflt_lbl lo_tag hi_tag
+    -- Sort the branches before calling mk_switch
+    let branches_lbls' = [ (fromIntegral i, l) | (i,l) <- sortBy (comparing fst) branches_lbls ]
 
-          -- Sort the branches before calling mk_switch
+    emit $ mk_switch tag_expr' branches_lbls'
+                       mb_deflt_lbl (fromIntegral lo_tag) (fromIntegral hi_tag)
 
     emitLabel join_lbl
 
-mk_switch :: CmmExpr -> [(ConTagZ, BlockId)]
+mk_switch :: CmmExpr -> [(Integer, BlockId)]
           -> Maybe BlockId
-          -> ConTagZ -> ConTagZ
-          -> FCode CmmAGraph
+          -> Integer -> Integer
+          -> CmmAGraph
 
 -- SINGLETON TAG RANGE: no case analysis to do
 mk_switch _tag_expr [(tag, lbl)] _ lo_tag hi_tag
   | lo_tag == hi_tag
   = ASSERT( tag == lo_tag )
-    return (mkBranch lbl)
+    mkBranch lbl
 
 -- SINGLETON BRANCH, NO DEFAULT: no case analysis to do
 mk_switch _tag_expr [(_tag,lbl)] Nothing _ _
-  = return (mkBranch lbl)
+  = mkBranch lbl
         -- The simplifier might have eliminated a case
         --       so we may have e.g. case xs of
         --                               [] -> e
         -- In that situation we can be sure the (:) case
         -- can't happen, so no need to test
 
--- SINGLETON BRANCH: one equality check to do
-mk_switch tag_expr [(tag,lbl)] (Just deflt) _ _
-  = do dflags <- getDynFlags
-       let cond =  cmmNeWord dflags tag_expr (mkIntExpr dflags tag)
-            -- We have lo_tag < hi_tag, but there's only one branch,
-            -- so there must be a default
-       return (mkCbranch cond deflt lbl)
-
--- TWO BRANCHES, NO DEFAULT: simply do it here
-mk_switch tag_expr [(tag1,lbl1), (_tag2,lbl2)] Nothing _ _
-  = do dflags <- getDynFlags
-       let cond =  cmmNeWord dflags tag_expr (mkIntExpr dflags tag1)
-       return (mkCbranch cond lbl2 lbl1)
-
 -- SOMETHING MORE COMPLICATED: defer to CmmCreateSwitchPlans
 -- See Note [Cmm Switches, the general plan] in CmmSwitch
 mk_switch tag_expr branches mb_deflt lo_tag hi_tag
-  = do let
-        -- NB. we have eliminated impossible branches at
-        -- either end of the range (see below), so the first
-        -- tag of a real branch is real_lo_tag (not lo_tag).
-        arms :: M.Map Integer BlockId
-        arms = M.fromList [ (fromIntegral i, l) | (i,l) <- branches ]
-
-        range = (fromIntegral lo_tag, fromIntegral hi_tag)
-       return $ mkSwitch
-           tag_expr
-           (mkSwitchTargets (Just range) mb_deflt arms)
+  = mkSwitch tag_expr $ mkSwitchTargets (Just (lo_tag, hi_tag)) mb_deflt (M.fromList branches)
 
 divideBranches :: Ord a => [(a,b)] -> ([(a,b)], a, [(a,b)])
 divideBranches branches = (lo_branches, mid, hi_branches)
